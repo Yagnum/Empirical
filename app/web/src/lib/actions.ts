@@ -50,10 +50,14 @@ export async function depositFunds(
   if (!result.ok) {
     // 422 here can only be about the amount, so say so rather than falling
     // back to the generic wording.
+    // 409 during onboarding means the broker has not activated the account
+    // yet; that takes a few seconds after it is opened.
     const message =
       result.failure === "invalid"
         ? "That amount was rejected. Enter a value between $1 and $100,000."
-        : describe(result.failure);
+        : result.failure === "conflict"
+          ? "Your brokerage account is still being activated. This usually takes under a minute. Try again shortly."
+          : describe(result.failure);
     return { status: "error", message };
   }
 

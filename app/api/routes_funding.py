@@ -43,6 +43,19 @@ def fund(
     given_name, family_name = clerk_auth.names(user)
     amount = body.amount.quantize(Decimal("0.01"))
 
+    # A brand-new account sits in SUBMITTED for a short time before Alpaca
+    # activates it, and Alpaca refuses journals until then with a bare 422.
+    # Say what is actually happening so the UI can ask the user to wait.
+    try:
+        status = str(alpaca.get_account(account_id).get("status", "")).upper()
+    except alpaca.AlpacaError as exc:
+        raise alpaca.http_error(exc) from exc
+    if status != "ACTIVE":
+        raise HTTPException(
+            status_code=409,
+            detail=f"account_not_active: the brokerage account is {status.lower() or 'not active'} yet",
+        )
+
     try:
         transfer = alpaca.fund_account(account_id, amount, f"{given_name} {family_name}")
     except alpaca.AlpacaError as exc:
