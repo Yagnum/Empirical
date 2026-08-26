@@ -1,0 +1,4 @@
+# Normalize line endings: LF in the repository on every platform.
+* text=auto eol=lf
+*.png binary
+*.svg text
