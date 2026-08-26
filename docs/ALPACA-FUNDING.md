@@ -226,6 +226,10 @@ still correct.
   Limit" (default $50), "JNLC Daily Transfer Limit" (default $10,000) and
   "Firm Account Daily Transfer Limit" (default $50,000). We set them to
   $100,000 / $500,000 / $1,000,000.
+- **Update, 2026-08-26 21:28 ET**: after the raised limits took effect, a
+  $10,000 deposit journal executed within seconds (`activity_created`). So
+  the limits do control instant execution. Journals created before the new
+  limits applied stayed pending until the batch. Deposits are instant now.
 - A journal **debits the source at creation and credits the target at
   execution**. That is why the sweep account looked poorer while the
   consolidation batch sat pending, and why conduit accounts zeroed at once.
