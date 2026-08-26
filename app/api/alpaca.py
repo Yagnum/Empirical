@@ -230,6 +230,25 @@ def create_account(email: str, given_name: str, family_name: str) -> dict:
     return _request("POST", "/v1/accounts", json=build_account_payload(email, given_name, family_name))
 
 
+def close_account(account_id: str) -> dict:
+    """Close a brokerage account the way a correspondent must (ADR-013).
+
+    ACCOUNT_CLOSED is terminal at Alpaca, and the contact email stays
+    reserved on the closed record, so a returning customer could never open
+    a new account. The procedure is therefore two steps, in this order:
+
+      1. retire the contact email on the record we are closing
+      2. close the account
+
+    Callers must settle the account first: cancel open orders, and journal
+    cash back to the firm account. Positions must be flat.
+    """
+    retired = f"closed-{account_id[:8]}@yagnum.invalid"
+    _request("PATCH", f"/v1/accounts/{account_id}", json={"contact": {"email_address": retired}})
+    _request("DELETE", f"/v1/accounts/{account_id}")
+    return get_account(account_id)
+
+
 def is_email_conflict(exc: AlpacaError) -> bool:
     """True when Alpaca refused because that email already has an account."""
     if exc.status_code == 409:

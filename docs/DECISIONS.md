@@ -285,3 +285,30 @@ relay for no immediate gain).
 
 **Consequences**: Three new frontend dependencies. Market hours now matter
 for testing: fills only occur while the market is open.
+
+---
+
+## ADR-013 — Account lifecycle: a login is not a brokerage account
+
+**Date**: 2026-08-26 · **Status**: Accepted
+
+**Context**: A user deleted their Clerk login. The Alpaca account stayed
+open. We then closed it, and the same user could not sign up again:
+Alpaca keeps a closed account's email reserved, `ACCOUNT_CLOSED` is
+terminal, and there is no reopen endpoint. A first fix opened the new
+account under a tagged email. That was withdrawn: a false contact email on
+a KYC record is not a design.
+
+**Decision**:
+- A login deletion does not close the brokerage account at once. It starts
+  an offboarding: cancel open orders, flatten positions, return cash to the
+  firm account, then close. Phase 4 wires this to a Clerk `user.deleted`
+  webhook.
+- Closing an account retires its contact email first, then closes it. The
+  procedure lives in `alpaca.close_account` and `scripts/close_account.py`.
+- A returning customer gets a new account. Closed accounts stay closed and
+  keep their history, as at any real broker.
+- Provisioning never adopts a closed account by email.
+
+**Consequences**: Sign-up after a deletion works without tricks. One more
+ops script. The Phase 4 webhook has a specification.
