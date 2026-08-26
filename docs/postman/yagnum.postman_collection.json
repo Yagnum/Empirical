@@ -1,0 +1,520 @@
+{
+  "info": {
+    "_postman_id": "6c1f0a2e-9d4b-4f7a-9c31-5a0b2e7d1f01",
+    "name": "Yagnum API",
+    "description": "Every Yagnum API route, generated from /openapi.json by app/api/scripts/make_postman.py.\n\nSet `token` in the environment to a session token from `uv run python scripts/dev_token.py`. Bearer auth is set once here at the collection level, so every request inherits it.\n\nMoney and prices are strings (ADR-010).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "0 - Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Health",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1 - Account",
+      "item": [
+        {
+          "name": "GET /accounts/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/accounts/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "me"
+              ]
+            },
+            "description": "Status + balances for the signed-in user's account."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /accounts",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/accounts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts"
+              ]
+            },
+            "description": "Idempotent: one Alpaca account per Clerk user, created on first call."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2 - Funding",
+      "item": [
+        {
+          "name": "POST /funding",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/funding",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "funding"
+              ]
+            },
+            "description": "Fund",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"10000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3 - Market data",
+      "item": [
+        {
+          "name": "GET /market/assets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/market/assets?q=AAPL&limit=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "market",
+                "assets"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "AAPL",
+                  "description": "Symbol prefix or part of a company name",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Symbol lookup for the ticker search box.\n\nAlpaca's assets endpoint has no search parameter, so the match happens\nhere over a cached copy of the active US equity list (see\n`alpaca.active_equity_assets`). An empty query returns an empty list\nrather than the first ten of fourteen thousand arbitrary tickers."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /market/bars/{symbol}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/market/bars/{{symbol}}?timeframe=1Day&limit=200",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "market",
+                "bars",
+                "{{symbol}}"
+              ],
+              "query": [
+                {
+                  "key": "timeframe",
+                  "value": "1Day",
+                  "description": "One of 1Day, 1Hour, 15Min, 5Min, 1Min",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "200",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "OHLCV candles, oldest first - the order every charting library wants."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /market/clock",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/market/clock",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "market",
+                "clock"
+              ]
+            },
+            "description": "Is the market open, and when does that next change?\n\nThe frontend needs this to say \"your order will queue until 9:30 AM\"\ninstead of leaving the user wondering why nothing filled."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /market/quotes/{symbol}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/market/quotes/{{symbol}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "market",
+                "quotes",
+                "{{symbol}}"
+              ]
+            },
+            "description": "Latest bid/ask plus the last trade, in one call.\n\nAlpaca splits these across two endpoints because they are two different\nfacts: the quote is what someone will trade at *now*, the trade is what\nsomeone actually paid. A buy preview needs both.\n\nOutside market hours the ask side is often 0 - there is nobody offering."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4 - Orders",
+      "item": [
+        {
+          "name": "DELETE /orders/{order_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/orders/{{order_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders",
+                "{{order_id}}"
+              ]
+            },
+            "description": "Cancel a working order.\n\nAlpaca's DELETE answers 204 with no body, so we read the order back to\nreport the real outcome. Cancellation is a *request*: an order that is\nstill working goes to `pending_cancel` first and only later to `canceled`.\nAn order that already filled cannot be cancelled at all - Alpaca refuses\nwith 422, which we surface as 409, the honest \"conflicts with current\nstate\" status."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/orders?status=open&limit=50",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "open",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Order history, newest first."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /orders/{order_id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/orders/{{order_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders",
+                "{{order_id}}"
+              ]
+            },
+            "description": "Get Order"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /orders",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "Submit an order and return it in whatever state Alpaca accepted it.\n\nWhile the market is closed a `day` order sits in `accepted` until the\nnext open; that is normal, not an error.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"symbol\": \"AAPL\",\n  \"qty\": \"1\",\n  \"side\": \"buy\",\n  \"type\": \"limit\",\n  \"limit_price\": \"1.00\",\n  \"time_in_force\": \"day\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5 - Portfolio",
+      "item": [
+        {
+          "name": "GET /portfolio/history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/portfolio/history?period=1M&timeframe=1D",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "portfolio",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "period",
+                  "value": "1M",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "timeframe",
+                  "value": "1D",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "The equity curve: four parallel arrays plus the baseline they measure from.\n\nParallel arrays rather than a list of objects because that is what Alpaca\nsends and what charting libraries consume, and it keeps the payload small\nfor a 1Min/1D series (390 points).\n\n`timestamps` are epoch **seconds** and are left-labelled: a point marks\nthe start of its interval."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /positions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/positions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "positions"
+              ]
+            },
+            "description": "Current holdings. An empty list is the normal state of a new account."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6 - Activity & statements",
+      "item": [
+        {
+          "name": "GET /activities",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/activities?page_size=100",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "activities"
+              ],
+              "query": [
+                {
+                  "key": "after",
+                  "value": "2026-08-01",
+                  "description": "YYYY-MM-DD, inclusive",
+                  "disabled": true
+                },
+                {
+                  "key": "until",
+                  "value": "2026-08-31",
+                  "description": "YYYY-MM-DD, inclusive",
+                  "disabled": true
+                },
+                {
+                  "key": "page_size",
+                  "value": "100",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Fills, deposits, journals, dividends and fees in one feed, newest first."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /activities/export.csv",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/activities/export.csv",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "activities",
+                "export.csv"
+              ],
+              "query": [
+                {
+                  "key": "after",
+                  "value": "2026-08-01",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "until",
+                  "value": "2026-08-31",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "The same rows as `/activities`, as a spreadsheet-ready download.\n\nBuilt in memory: a statement for a paper-trading account is at most a few\nhundred rows, so streaming would be ceremony for nothing."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /documents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/documents",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "documents"
+              ]
+            },
+            "description": "Alpaca-generated statements, trade confirmations and tax forms.\n\nA brand-new sandbox account has only its account application; monthly\nstatements appear after a month exists. An empty list is fine."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /documents/{document_id}/download",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_id}}/download",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "documents",
+                "{{document_id}}",
+                "download"
+              ]
+            },
+            "description": "Stream one document back to the browser.\n\nAlpaca answers its own download endpoint with a 301 to a presigned S3 URL\nthat expires in ~15 minutes. We could hand that URL to the browser, but\nproxying is better here: the signed link never reaches client-side code,\nand the frontend does not have to special-case a cross-origin redirect it\ncannot read. Our Basic credentials are *not* sent to S3 - see\n`alpaca.document_download_url`."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    }
+  ]
+}

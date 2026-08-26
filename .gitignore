@@ -1,0 +1,12 @@
+# Secrets — never commit real keys (see .env.example for the shape)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+.venv/
+*.pyc
+
+# Node
+node_modules/

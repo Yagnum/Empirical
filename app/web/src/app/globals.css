@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+/*
+  Yagnum design tokens (ADR-005: trust-first, light, one deep blue).
+
+  The visual language is a *brokerage statement* — but a current one. Cool
+  paper ground, white document surfaces, ledger rules kept only where they
+  carry meaning, and a grotesk doing the talking. The serif survives in two
+  places only: the wordmark, and the single hero money figure on a screen.
+*/
+@theme {
+  /* Surfaces --------------------------------------------------------- */
+  --color-paper: #f5f7fa; /* page ground — cool, never stark white */
+  --color-surface: #ffffff; /* document/card surface */
+  --color-rule: #dde3ea; /* structural hairline */
+  --color-rule-soft: #eaeef3; /* ledger rule inside the statement card */
+
+  /* Ink -------------------------------------------------------------- */
+  /* Three ink weights, all of which clear WCAG AA (4.5:1) on both the paper
+     ground and the white surface — small print is where that usually slips. */
+  --color-ink: #10233a; /* headings and figures */
+  --color-ink-soft: #4c5871; /* body copy, labels */
+  --color-ink-faint: #616e80; /* small print, references, notes */
+
+  /* The one accent --------------------------------------------------- */
+  --color-accent: #15467e; /* deep ink blue */
+  --color-accent-bright: #1d5ca6; /* interactive lift on hover (6.7:1 on white) */
+  --color-accent-deep: #0d3260; /* pressed */
+  --color-accent-wash: #edf2f8; /* tinted panels */
+
+  /* Paper-trading indicator (calm ochre, never alarm red) ------------- */
+  --color-stamp: #8a6410;
+  --color-stamp-wash: #fdf7ea;
+  --color-stamp-rule: #e7d6ab;
+
+  /* Reserved for Phase 2 P&L figures --------------------------------- */
+  --color-gain: #136f49;
+  --color-loss: #a32b24;
+
+  /* Furniture -------------------------------------------------------- */
+  --radius-card: 12px;
+  --radius-control: 8px;
+  /* Warm-navy rather than neutral grey, so elevation reads soft not sooty. */
+  --shadow-card:
+    0 1px 2px rgba(26, 40, 62, 0.04), 0 6px 16px -8px rgba(26, 40, 62, 0.1),
+    0 24px 44px -28px rgba(26, 40, 62, 0.18);
+
+  /* Type ------------------------------------------------------------- */
+  --font-display: var(--font-schibsted), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-source-serif), Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-public-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  /* No dark theme in Phase 1 — pin form controls to the light palette. */
+  color-scheme: light;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+  Small caps survive only on figure labels inside a statement card, where they
+  read as ledger notation. Tracking is looser than a true "micro-caps" label so
+  it stays calm — everywhere else, labels are sentence case.
+*/
+@utility stat-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+
+/*
+  Figures are set with tabular (fixed-width) numerals so digits line up in a
+  column and don't jitter as values change — the same reason ledgers do it.
+*/
+@utility figure-nums {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+/*
+  The one motion moment: the hero figure block settles into place on load.
+  Nothing else on the page animates.
+*/
+@keyframes settle {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@utility settle-in {
+  animation: settle 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Keyboard focus stays visible everywhere. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
