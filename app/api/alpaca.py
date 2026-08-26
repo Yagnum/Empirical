@@ -244,11 +244,14 @@ def find_account_by_email(email: str) -> dict | None:
     call won the race, so the right move is to reuse its account, not fail.
     """
     matches = _request("GET", f"/v1/accounts?query={email}") or []
-    for account in matches:
+    # A closed account is not reusable: Alpaca keeps the record, but nothing
+    # can be traded or funded in it. Only a live account is worth adopting.
+    live = [a for a in matches if str(a.get("status", "")).upper() not in {"CLOSED", "DISABLED", "ACCOUNT_CLOSED"}]
+    for account in live:
         contact = account.get("contact") or {}
         if str(contact.get("email_address", "")).lower() == email.lower():
             return account
-    return matches[0] if len(matches) == 1 else None
+    return live[0] if len(live) == 1 else None
 
 
 def get_account(account_id: str) -> dict:
