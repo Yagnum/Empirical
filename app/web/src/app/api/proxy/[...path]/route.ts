@@ -19,6 +19,14 @@ import { forward } from "@/lib/api";
        ones we never meant to expose.
 */
 
+/*
+  The API stamps every response with this (app/api/main.py). Recording it on
+  our side of a failure is what makes a user's "it didn't load" joinable to the
+  API's audit log — without it, the two halves of one broken request are two
+  unrelated log lines.
+*/
+const REQUEST_ID = "x-request-id";
+
 const ALLOWED: RegExp[] = [
   /^accounts\/me$/,
   /^market\/clock$/,
@@ -33,11 +41,21 @@ const ALLOWED: RegExp[] = [
   /^activities\/export\.csv$/,
   /^documents$/,
   /^documents\/[A-Za-z0-9-]{1,64}\/download$/,
+  /^pnl\/realized$/,
 ];
 
 // Headers worth carrying back. Everything else (upstream auth, cookies, CORS)
 // is dropped rather than relayed.
-const PASSTHROUGH = ["content-type", "content-disposition", "content-length"];
+//
+// X-Request-ID is relayed deliberately: it is the API's own handle on the call
+// (see app/api/main.py), it names a row in the audit log, and it carries no
+// information about anyone but the caller who just made the request.
+const PASSTHROUGH = [
+  "content-type",
+  "content-disposition",
+  "content-length",
+  REQUEST_ID,
+];
 
 export async function GET(
   request: NextRequest,
@@ -47,6 +65,7 @@ export async function GET(
   const target = path.join("/");
 
   if (!ALLOWED.some((pattern) => pattern.test(target))) {
+    console.error(`[proxy] blocked path=${target}`);
     return Response.json({ detail: "not_proxied" }, { status: 404 });
   }
 
@@ -54,9 +73,20 @@ export async function GET(
   try {
     upstream = await forward("/" + target + request.nextUrl.search);
   } catch {
-    // The API is not answering at all. Say so in the shape the client's error
-    // handling already understands.
+    // The API is not answering at all, so there is no request id to join on —
+    // which is itself the finding: the call never reached the API.
+    console.error(`[proxy] api unreachable path=${target}`);
     return Response.json({ detail: "unreachable" }, { status: 502 });
+  }
+
+  if (!upstream.ok) {
+    // One flat string, not an object: log transports that serialise structured
+    // arguments differently would otherwise drop the one field that matters.
+    console.error(
+      `[proxy] upstream error path=${target}` +
+        ` status=${upstream.status}` +
+        ` request_id=${upstream.headers.get(REQUEST_ID) ?? "none"}`,
+    );
   }
 
   const headers = new Headers();

@@ -5,7 +5,7 @@ import { auth } from "@clerk/nextjs/server";
 import { HistoryPanel } from "@/components/history-panel";
 import { Panel, PanelHead } from "@/components/panel";
 import { StatementsPanel } from "@/components/statements-panel";
-import { getActivities, getDocuments } from "@/lib/api";
+import { getActivities, getDocuments, getRealizedPl } from "@/lib/api";
 import { daysAgo, today } from "@/lib/datetime";
 
 export const metadata: Metadata = { title: "History" };
@@ -15,9 +15,12 @@ export default async function HistoryPage() {
 
   // The same default window the panel opens on, so the server render and the
   // first client render agree and nothing flashes.
-  const [activities, documents] = await Promise.all([
-    getActivities({ after: daysAgo(30), until: today(), page_size: 100 }),
+  const openingRange = { after: daysAgo(30), until: today() };
+
+  const [activities, documents, realized] = await Promise.all([
+    getActivities({ ...openingRange, page_size: 100 }),
     getDocuments(),
+    getRealizedPl(openingRange),
   ]);
 
   if (!activities.ok && activities.failure === "no_account") {
@@ -38,8 +41,11 @@ export default async function HistoryPage() {
 
       <section className="mt-6">
         <Panel>
+          {/* No initial figure when the ledger is unavailable: the panel then
+              asks for itself, gets the same 503, and steps aside quietly. */}
           <HistoryPanel
             initialActivities={activities.ok ? activities.data : undefined}
+            initialRealized={realized.ok ? realized.data : undefined}
           />
         </Panel>
       </section>

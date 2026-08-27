@@ -11,6 +11,7 @@ import { OrderStatus } from "@/components/order-status";
 import { Panel, PanelHead } from "@/components/panel";
 import { PortfolioChart } from "@/components/portfolio-chart";
 import { PositionsTable } from "@/components/positions-table";
+import { RealizedFigure } from "@/components/realized-figure";
 import { LedgerEmpty } from "@/components/ledger";
 import { LedgerSkeleton } from "@/components/states";
 import { activityChipClass, activityLabel } from "@/lib/activity";
@@ -20,8 +21,10 @@ import {
   getOrders,
   getPortfolioHistory,
   getPositions,
+  getRealizedPl,
   type Account,
   type PortfolioHistory,
+  type RealizedPl,
 } from "@/lib/api";
 import { portfolioRange } from "@/lib/chart";
 import { daysAgo, formatDate, formatDateTime, today } from "@/lib/datetime";
@@ -35,9 +38,11 @@ export default async function DashboardPage() {
   await auth.protect();
 
   const day = portfolioRange("1D");
-  const [account, history] = await Promise.all([
+  const [account, history, realized] = await Promise.all([
     getAccount(),
     getPortfolioHistory(day.period, day.timeframe),
+    // No range: everything this account has ever locked in.
+    getRealizedPl(),
   ]);
 
   // The API's own signal that this user has never been provisioned.
@@ -60,7 +65,11 @@ export default async function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-10 sm:py-12">
-      <AccountSummary account={account.data} history={initialHistory} />
+      <AccountSummary
+        account={account.data}
+        history={initialHistory}
+        realized={realized.ok ? realized.data : undefined}
+      />
 
       <section className="mt-6">
         <Panel>
@@ -142,9 +151,12 @@ function lastValue(series: string[] | undefined): number | null {
 function AccountSummary({
   account,
   history,
+  realized,
 }: {
   account: Account;
   history?: PortfolioHistory;
+  /** Absent when the ledger cannot answer — the stat is then simply not there. */
+  realized?: RealizedPl;
 }) {
   const changeAmount = lastValue(history?.profit_loss);
   const changePct = lastValue(history?.profit_loss_pct);
@@ -196,6 +208,18 @@ function AccountSummary({
               value={formatUsd(account.buying_power)}
             />
           </div>
+          {/* Secondary to cash and buying power, and never near the hero: the
+              portfolio value is what the account is worth now, and this is what
+              it has banked. Full width at tablet size so the pair above keeps
+              its own row. */}
+          {realized ? (
+            <div className="border-t border-rule-soft px-6 py-6 sm:col-span-2 lg:col-span-1">
+              <RealizedFigure
+                label="Realized P/L (all time)"
+                total={realized.total}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
 

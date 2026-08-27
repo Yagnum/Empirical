@@ -20,6 +20,7 @@ import { useMarketClock, useQuote } from "@/lib/hooks";
 import {
   checkOrderDraft,
   estimateNotional,
+  newIdempotencyKey,
   orderStatusLabel,
   type OrderDraft,
 } from "@/lib/orders";
@@ -98,6 +99,28 @@ function TicketForm({
   const [timeInForce, setTimeInForce] = useState<TimeInForce>("day");
   const [reviewing, setReviewing] = useState(false);
 
+  /*
+    One key per confirmed ticket.
+
+    It is minted when the ticket is read back for confirmation — the moment the
+    order stops changing — and held from then on, so pressing "Place order"
+    again after a timeout resends the same key and the API replays the original
+    order instead of buying twice. Going back to Edit throws the key away,
+    because whatever is confirmed next is a different order and deserves to be
+    treated as one.
+  */
+  const [idempotencyKey, setIdempotencyKey] = useState("");
+
+  function confirmTicket() {
+    setIdempotencyKey(newIdempotencyKey());
+    setReviewing(true);
+  }
+
+  function editTicket() {
+    setIdempotencyKey("");
+    setReviewing(false);
+  }
+
   const [state, formAction, pending] = useActionState(submitOrder, INITIAL);
   const reviewHeading = useRef<HTMLParagraphElement>(null);
   const queryClient = useQueryClient();
@@ -123,6 +146,15 @@ function TicketForm({
     }
   }, [state.status, queryClient]);
 
+  /*
+    The API has seen this key against a different order, so nothing was placed
+    and resending the same slip can only fail the same way. Editing is the only
+    move that helps — it retires the key — so the ticket says so with its
+    buttons as well as its message.
+  */
+  const keyConflict =
+    state.status === "error" && state.code === "idempotency_conflict";
+
   if (state.status === "placed") {
     return <OrderPlaced order={state.order} onNewSlip={onNewSlip} />;
   }
@@ -140,6 +172,7 @@ function TicketForm({
       <input type="hidden" name="type" value={type} />
       <input type="hidden" name="limit_price" value={limitPrice} />
       <input type="hidden" name="time_in_force" value={timeInForce} />
+      <input type="hidden" name="idempotency_key" value={idempotencyKey} />
 
       {reviewing ? (
         <Review
@@ -155,8 +188,9 @@ function TicketForm({
           power={power}
           side={side}
           error={state.status === "error" ? state.message : null}
+          keyConflict={keyConflict}
           pending={pending}
-          onBack={() => setReviewing(false)}
+          onBack={editTicket}
           clock={<MarketStatus initialClock={initialClock} explainQueueing />}
         />
       ) : (
@@ -266,7 +300,7 @@ function TicketForm({
           <button
             type="button"
             disabled={!check.valid}
-            onClick={() => setReviewing(true)}
+            onClick={confirmTicket}
             className={`${buttonStyles("primary")} mt-1 w-full`}
           >
             Review {side} order
@@ -399,6 +433,7 @@ function Review({
   power,
   side,
   error,
+  keyConflict,
   pending,
   onBack,
   clock,
@@ -415,6 +450,8 @@ function Review({
   power: number | null;
   side: OrderSide;
   error: string | null;
+  /** The submitted key was already spent — only editing can clear it. */
+  keyConflict: boolean;
   pending: boolean;
   onBack: () => void;
   clock: ReactNode;
@@ -471,11 +508,12 @@ function Review({
         {error ?? ""}
       </p>
 
+      {/* Emphasis follows the only action that can succeed. */}
       <div className="mt-1 grid gap-2 sm:grid-cols-[1fr_auto]">
         <button
           type="submit"
           disabled={pending}
-          className={`${buttonStyles("primary")} w-full`}
+          className={`${buttonStyles(keyConflict ? "secondary" : "primary")} w-full`}
         >
           {pending ? "Placing…" : `Place ${side} order`}
         </button>
@@ -483,7 +521,7 @@ function Review({
           type="button"
           disabled={pending}
           onClick={onBack}
-          className={buttonStyles("secondary")}
+          className={buttonStyles(keyConflict ? "primary" : "secondary")}
         >
           Edit
         </button>

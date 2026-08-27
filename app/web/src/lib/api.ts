@@ -38,6 +38,7 @@ import type {
   Position,
   ProvisionedAccount,
   Quote,
+  RealizedPl,
   StatementDocument,
   Transfer,
 } from "@/lib/types";
@@ -63,9 +64,16 @@ export function query(params: Record<string, QueryValue>): string {
  * that need the bytes (a CSV export, a PDF statement) can stream them through
  * untouched. Rejects only if the API could not be reached at all.
  */
+export type RequestInit_ = {
+  method?: string;
+  body?: unknown;
+  /** Extra request headers, e.g. an Idempotency-Key on a POST. */
+  headers?: Record<string, string>;
+};
+
 export async function forward(
   path: string,
-  init?: { method?: string; body?: unknown },
+  init?: RequestInit_,
 ): Promise<Response> {
   const { getToken } = await auth();
   const token = await getToken();
@@ -78,6 +86,8 @@ export async function forward(
   return fetch(API_URL + path, {
     method: init?.method ?? "GET",
     headers: {
+      ...init?.headers,
+      // Ours last: a caller must not be able to overwrite the credentials.
       Authorization: "Bearer " + token,
       "Content-Type": "application/json",
     },
@@ -89,7 +99,7 @@ export async function forward(
 
 async function request<T>(
   path: string,
-  init?: { method?: string; body?: unknown },
+  init?: RequestInit_,
 ): Promise<ApiResult<T>> {
   let response: Response;
   try {
@@ -121,6 +131,9 @@ function classify(status: number, detail: string | null): ApiFailure {
   if (status === 401 || status === 403) return "unauthenticated";
   if (status === 422) return "invalid";
   if (status === 409) return "conflict";
+  // The API answered, and its answer is "I cannot compute this right now" —
+  // e.g. /pnl/realized with no ledger database behind it.
+  if (status === 503) return "unavailable";
   if (status === 400) {
     return detail?.startsWith("alpaca_rejected") ? "rejected" : "invalid";
   }
@@ -188,8 +201,23 @@ export function getBars(
 
 /* -------------------------------------------------------------- orders --- */
 
-export function placeOrder(order: NewOrder): Promise<ApiResult<Order>> {
-  return request<Order>("/orders", { method: "POST", body: order });
+/**
+ * Places one equity order.
+ *
+ * `idempotencyKey` makes the call safe to retry: the API replays the original
+ * order for a key it has already seen with the same body, and answers 409
+ * {"detail":"idempotency_key_reused"} for the same key with a different one.
+ * Omitting it is still valid — every retry then places a new order.
+ */
+export function placeOrder(
+  order: NewOrder,
+  idempotencyKey?: string,
+): Promise<ApiResult<Order>> {
+  return request<Order>("/orders", {
+    method: "POST",
+    body: order,
+    headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+  });
 }
 
 export function getOrders(
@@ -235,4 +263,21 @@ export function getActivities(params: {
 
 export function getDocuments(): Promise<ApiResult<StatementDocument[]>> {
   return request<StatementDocument[]>("/documents");
+}
+
+/* ------------------------------------------------------------ realized --- */
+
+/**
+ * Realized P/L over a date range, or over all time when the range is omitted.
+ *
+ * This is the one figure the broker cannot supply: a position carries an
+ * unrealized number while you hold it and takes it to the grave when you sell.
+ * The API rebuilds it from the fills it keeps, so it can answer "unavailable"
+ * (503, `failure: "unavailable"`) where every other route would answer with
+ * data. Callers must treat that as "hide this", never as a fault to report.
+ */
+export function getRealizedPl(
+  params: { after?: string; until?: string } = {},
+): Promise<ApiResult<RealizedPl>> {
+  return request<RealizedPl>("/pnl/realized" + query({ ...params }));
 }

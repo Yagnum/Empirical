@@ -11,7 +11,11 @@ import {
   type Order,
 } from "@/lib/api";
 import { checkAmount } from "@/lib/money";
-import { checkOrderDraft, type OrderDraft } from "@/lib/orders";
+import {
+  checkOrderDraft,
+  isIdempotencyKey,
+  type OrderDraft,
+} from "@/lib/orders";
 
 /*
   Server Actions are reachable by direct POST, not only through our form, so
@@ -81,7 +85,15 @@ export async function depositFunds(
 
 export type SubmitOrderState =
   | { status: "idle" }
-  | { status: "error"; message: string }
+  | {
+      status: "error";
+      message: string;
+      /**
+       * Set only when the API refused the idempotency key. The ticket reads it
+       * to mint a fresh one, so the next attempt can actually get through.
+       */
+      code?: "idempotency_conflict";
+    }
   | { status: "placed"; order: Order };
 
 /**
@@ -114,13 +126,30 @@ export async function submitOrder(
     return { status: "error", message: check.message };
   }
 
-  const result = await placeOrder(check.order);
+  // The ticket mints this when the order is confirmed and holds it across
+  // retries, so a resend of the same order replays rather than repeats. A key
+  // we do not recognise is dropped rather than forwarded: it would otherwise go
+  // straight into a request header.
+  const submitted = String(formData.get("idempotency_key") ?? "");
+  const idempotencyKey = isIdempotencyKey(submitted) ? submitted : undefined;
+
+  const result = await placeOrder(check.order, idempotencyKey);
 
   if (!result.ok) {
     // A broker rejection carries a reason the trader needs to read verbatim —
     // "insufficient buying power", "asset not tradable". Never paraphrase it.
     if (result.failure === "rejected" && result.detail) {
       return { status: "error", message: brokerMessage(result.detail) };
+    }
+    // The key was already spent on a different order. Nothing was placed, and
+    // the trader is the only one who can say which order they meant.
+    if (result.detail === "idempotency_key_reused") {
+      return {
+        status: "error",
+        code: "idempotency_conflict",
+        message:
+          "This looks like a repeat submission with changed details. Review the order and submit again.",
+      };
     }
     return { status: "error", message: describe(result.failure) };
   }

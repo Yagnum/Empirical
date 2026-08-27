@@ -27,6 +27,22 @@ const GLYPH: Record<-1 | 0 | 1, string> = {
   [-1]: "▼",
 };
 
+/*
+  Exported so a figure set at another size — the realized P/L stat, which is
+  set at the scale of a Figure rather than a Delta — still carries exactly this
+  colour and exactly this glyph. One pairing, one place it is decided.
+*/
+
+/** The text colour for a direction. */
+export function deltaTone(dir: -1 | 0 | 1): string {
+  return TONE[dir];
+}
+
+/** The arrow for a direction, or "" when nothing moved. */
+export function deltaGlyph(dir: -1 | 0 | 1): string {
+  return GLYPH[dir];
+}
+
 export function Delta({
   amount,
   percent,

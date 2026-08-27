@@ -85,6 +85,33 @@ export function checkOrderDraft(draft: OrderDraft): OrderCheck {
   return { valid: true, order };
 }
 
+/* --------------------------------------------------------- idempotency --- */
+
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A fresh key for one submission of one ticket.
+ *
+ * The point of the key is that pressing "Place order" twice — a double click, a
+ * flaky connection, a reload of a page mid-request — cannot buy the shares
+ * twice: the API replays the original order for a key it has already seen. It
+ * only works if the key is minted once per *intended* order and then held on to
+ * across retries, which is why the ticket keeps it in state rather than
+ * generating one per render.
+ */
+export function newIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
+
+/**
+ * Whether a key is one of ours. The Server Action re-checks it because it can
+ * be POSTed to directly, and an unchecked string ends up in a request header.
+ */
+export function isIdempotencyKey(value: string): boolean {
+  return UUID.test(value);
+}
+
 /**
  * The value the ticket shows before submission. It is an estimate for market
  * orders by definition — the fill price is whatever the book gives you.

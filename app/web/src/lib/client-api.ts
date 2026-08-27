@@ -6,6 +6,7 @@ import type {
   Order,
   PortfolioHistory,
   Quote,
+  RealizedPl,
 } from "@/lib/types";
 
 /*
@@ -107,6 +108,29 @@ export const fetchActivities = (
   signal?: AbortSignal,
 ) => get<Activity[]>("activities", { after, until, page_size: 100 }, signal);
 
+/*
+  Fetched from the browser, not because it changes often — it moves only when a
+  sell fills — but because the range it answers for is the one the history
+  filter is holding, and that lives in the browser. The first render is still
+  served from the server's own call.
+*/
+export const fetchRealizedPl = (
+  after: string,
+  until: string,
+  signal?: AbortSignal,
+) => get<RealizedPl>("pnl/realized", { after, until }, signal);
+
+/** The API's own word for "there is no ledger behind me right now". */
+export const LEDGER_UNAVAILABLE = "ledger_unavailable";
+
+/** True when realized P/L cannot be computed at all, as opposed to failing. */
+export function isLedgerUnavailable(error: unknown): boolean {
+  return (
+    error instanceof ProxyError &&
+    (error.status === 503 || error.detail === LEDGER_UNAVAILABLE)
+  );
+}
+
 /* ---------------------------------------------------------- query keys --- */
 
 /*
@@ -124,6 +148,8 @@ export const keys = {
     ["portfolio", period, timeframe] as const,
   activities: (after: string, until: string) =>
     ["activities", after, until] as const,
+  realized: (after: string, until: string) =>
+    ["realized", after, until] as const,
 };
 
 /*

@@ -144,7 +144,35 @@ export type Activity = {
   qty: string | null;
   price: string | null;
   net_amount: string | null;
+  /**
+   * What this row locked in, when it is a sell the FIFO ledger could match
+   * against earlier buys. `null` means "not known" — a buy, a deposit, or a
+   * sell the ledger has not matched — and must never be drawn as a zero.
+   * A matched sell that broke exactly even really does send "0.00".
+   */
+  realized_pl: string | null;
   description: string | null;
+};
+
+/**
+ * Realized profit and loss over a date range (GET /pnl/realized).
+ *
+ * `total` always equals the sum of `by_symbol`, because the API sums the same
+ * stored rows it lists. `trades` counts sell fills, not round trips: one sell
+ * that consumed three lots is one trade. An account that has never sold gets
+ * a "0.00" total and an empty breakdown, which is an answer, not an error.
+ */
+export type RealizedPl = {
+  total: string;
+  by_symbol: RealizedBySymbol[];
+  /** The matching rule the API used, e.g. "FIFO". Shown, never assumed. */
+  method: string;
+};
+
+export type RealizedBySymbol = {
+  symbol: string;
+  realized: string;
+  trades: number;
 };
 
 export type StatementDocument = {
@@ -165,6 +193,12 @@ export type ApiFailure =
   | "rejected"
   /** 409 — the resource is not in a state that allows this. */
   | "conflict"
+  /**
+   * 503 — the API is up but a dependency it needs for this answer is not
+   * (today: no ledger database). Distinct from "unexpected" because the right
+   * response is to hide the feature quietly, not to report a fault.
+   */
+  | "unavailable"
   /** No Clerk session token was available for this request. */
   | "unauthenticated"
   /** The API never answered: not running, wrong port, network down. */
