@@ -122,7 +122,10 @@ Same auth rule. Full request and response schemas live in Swagger at
 ADR-014 additions: `GET /pnl/realized` (FIFO realized profit), a
 `realized_pl` field on activity rows and the CSV, an optional
 `Idempotency-Key` header on `POST /orders`, and an `X-Request-ID` header on
-every response (join key to the `audit_log` table).
+every response (join key to the `audit_log` table). Later joined by
+`GET /pnl/preview?symbol=&qty=` — the read-only FIFO cost basis of a
+prospective sell, so the order ticket can estimate the gain before the
+trade with the same method History records after it.
 
 ADR-015 additions: `POST /accounts/reset` (sell everything, return the
 cash to the firm sweep, land at $0 — each call reports `liquidating` or
