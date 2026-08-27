@@ -413,3 +413,44 @@ def realized_summary(
         for symbol, (amount, trades) in sorted(per_symbol.items())
     ]
     return {"total": money(total), "by_symbol": by_symbol, "method": METHOD}
+
+
+def preview_cost_basis(session: Session, account_id: str, symbol: str, qty: Decimal) -> dict:
+    """What selling `qty` shares now would cost-base against, before it happens.
+
+    The read-only twin of `_match_sell`: it walks the same open lots in the
+    same order and does the same take-from-each arithmetic, but writes
+    nothing — the order ticket asks this on every quantity change, and a
+    preview must never move the ledger it is previewing. Because both walk
+    identically, the estimate the ticket shows is the figure `match_lots`
+    will record when the sell actually fills (at whatever price it fills).
+
+    `matched_qty` can come back smaller than `qty`: the open lots hold fewer
+    shares than the caller wants to sell, either because our synced history
+    is shorter than the position (see KNOWN LIMIT above) or because they are
+    simply selling more than they hold. `cost_basis` and `avg_unit_cost` are
+    null in the nothing-matched case — a null beats a fabricated zero, which
+    would present the entire sale as profit.
+    """
+    remaining = qty
+    cost_basis = ZERO
+    matched = ZERO
+    for lot in _open_lots(session, account_id, symbol):
+        if remaining <= ZERO:
+            break
+        take = lot.qty_open if lot.qty_open < remaining else remaining
+        cost_basis += take * lot.unit_cost
+        matched += take
+        remaining -= take
+
+    # NUMERIC(28,10) comes back as "3.0000000000"; normalize() drops the
+    # trailing zeros and format(..., "f") keeps 1E+2 from leaking out as
+    # exponent notation.
+    return {
+        "symbol": symbol,
+        "qty": format(qty.normalize(), "f"),
+        "matched_qty": format(matched.normalize(), "f"),
+        "cost_basis": money(cost_basis) if matched > ZERO else None,
+        "avg_unit_cost": money(cost_basis / matched) if matched > ZERO else None,
+        "method": METHOD,
+    }

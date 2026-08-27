@@ -150,6 +150,7 @@ def test_health_is_public(anon_client):
         ("GET", "/activities"),
         ("GET", "/activities/export.csv"),
         ("GET", "/documents"),
+        ("GET", "/pnl/preview?symbol=AAPL&qty=1"),
     ],
 )
 def test_every_route_requires_a_token(anon_client, method, path):
@@ -954,6 +955,56 @@ def test_realized_pnl_of_an_account_that_never_sold(db_client, monkeypatch):
 def test_realized_pnl_needs_a_database(client, monkeypatch):
     """With no DATABASE_URL the honest answer is 503, not a zero total."""
     assert client.get("/pnl/realized").status_code == 503
+
+
+def test_pnl_preview_walks_lots_oldest_first(db_client, monkeypatch):
+    """3 shares across a $10 lot and a $12 lot: FIFO says 2*10 + 1*12."""
+    feed(monkeypatch, [LEDGER_FEED[0], LEDGER_FEED[1]])  # buys only
+    assert db_client.get("/pnl/preview", params={"symbol": "AAPL", "qty": "3"}).json() == {
+        "symbol": "AAPL",
+        "qty": "3",
+        "matched_qty": "3",
+        "cost_basis": "32.00",
+        "avg_unit_cost": "10.67",
+        "method": "FIFO",
+    }
+
+
+def test_pnl_preview_skips_spent_lots(db_client, monkeypatch):
+    """After the sell consumed the $10 lot, the next share previews at $12."""
+    feed(monkeypatch, LEDGER_FEED)
+    preview = db_client.get("/pnl/preview", params={"symbol": "aapl", "qty": "1"}).json()
+    assert preview["cost_basis"] == "12.00"
+    assert preview["avg_unit_cost"] == "12.00"
+    assert preview["matched_qty"] == "1"
+    assert preview["symbol"] == "AAPL"  # case-folded
+
+
+def test_pnl_preview_reports_a_partial_match(db_client, monkeypatch):
+    """Selling more than the lots hold: price what we can, admit the rest."""
+    feed(monkeypatch, LEDGER_FEED)
+    preview = db_client.get("/pnl/preview", params={"symbol": "AAPL", "qty": "5"}).json()
+    assert preview["matched_qty"] == "1"
+    assert preview["cost_basis"] == "12.00"
+
+
+def test_pnl_preview_with_no_lots_is_null_not_zero(db_client, monkeypatch):
+    """No open lot means no basis. A zero would present the sale as pure profit."""
+    feed(monkeypatch, LEDGER_FEED)
+    preview = db_client.get("/pnl/preview", params={"symbol": "TSLA", "qty": "1"}).json()
+    assert preview["matched_qty"] == "0"
+    assert preview["cost_basis"] is None
+    assert preview["avg_unit_cost"] is None
+
+
+def test_pnl_preview_needs_a_database(client, monkeypatch):
+    assert client.get("/pnl/preview", params={"symbol": "AAPL", "qty": "1"}).status_code == 503
+
+
+def test_pnl_preview_rejects_bad_input(db_client, monkeypatch):
+    feed(monkeypatch, LEDGER_FEED)
+    assert db_client.get("/pnl/preview", params={"symbol": "AAPL", "qty": "0"}).status_code == 422
+    assert db_client.get("/pnl/preview", params={"symbol": "AAPL;", "qty": "1"}).status_code == 422
 
 
 def test_everything_still_works_with_no_database(client, monkeypatch):

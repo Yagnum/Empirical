@@ -16,6 +16,8 @@ in Decimal over the stored rows, so `total` always equals the parts.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 import clerk_auth
@@ -25,6 +27,7 @@ import ledger
 router = APIRouter(tags=["pnl"])
 
 DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}$"
+SYMBOL_PATTERN = r"^[A-Za-z][A-Za-z.\-]{0,15}$"
 
 
 @router.get("/pnl/realized")
@@ -54,3 +57,34 @@ def realized(
 
     with db.session_scope() as session:
         return ledger.realized_summary(session, account_id, after=after, until=until)
+
+
+@router.get("/pnl/preview")
+def preview(
+    symbol: str = Query(..., pattern=SYMBOL_PATTERN, description="e.g. NVDA"),
+    qty: Decimal = Query(..., gt=0, le=Decimal("1000000"), description="shares to sell"),
+    account_id: str = Depends(clerk_auth.require_account_id),
+) -> dict:
+    """The FIFO cost basis a sell of `qty` shares would match against, today.
+
+    This is what lets the order ticket say "you bought these shares at X"
+    *before* the trade, using the same lot walk that will record the realized
+    figure after the fill — so the preview and the history can never quote
+    two different methods. Read-only: nothing is matched, nothing is written.
+
+    The gain itself is not computed here, deliberately. The ticket multiplies
+    against a quote that changes every few seconds; shipping the cost basis
+    once and letting the display do the last subtraction beats re-asking the
+    ledger on every tick. `cost_basis` is null when no open lot covers the
+    sale (history gap, or selling more than held) — display "unknown", never
+    zero.
+    """
+    if not db.is_configured():
+        raise HTTPException(status_code=503, detail="ledger_unavailable")
+
+    # Same best-effort refresh as /pnl/realized: a buy that filled seconds
+    # ago should already be sellable with a known basis.
+    ledger.refresh(account_id)
+
+    with db.session_scope() as session:
+        return ledger.preview_cost_basis(session, account_id, symbol.upper(), qty)
