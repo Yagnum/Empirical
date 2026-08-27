@@ -347,3 +347,50 @@ PostgreSQL.
 at deploy time. The API grows a small persistence layer; Alpaca remains
 the system of record for balances and positions — our tables record what
 Alpaca forgets, never a second copy of what it remembers.
+
+---
+
+## ADR-015 — Offboarding webhook and reset-balance: liquidate, return cash
+
+**Date**: 2026-08-27 · **Status**: Accepted
+
+**Context**: ADR-013 specified *what* closure means (cancel orders,
+flatten positions, return cash, retire email, close) but left two
+mechanisms open. First: when Clerk sends `user.deleted`, the user is
+already gone from Clerk — and their private metadata, which held the
+Alpaca account id, is gone with them. Second: onboarding promises "reset
+the balance whenever you want a clean run", and the copy never said what
+happens to shares the user still holds.
+
+**Decision**:
+- **The audit log is the memory that outlives the user.** The webhook
+  finds the Alpaca account by reading our own `audit_log`: the latest row
+  for that Clerk user id with an account id on it. This is the first
+  feature that *depends* on ADR-014's database rather than merely
+  benefiting from it.
+- **The webhook authenticates with a Svix signature, not a Clerk token.**
+  There is no session behind a webhook. Clerk signs each delivery
+  (HMAC-SHA256 over `id.timestamp.body`); we verify with a constant-time
+  compare and reject stale timestamps. An unconfigured signing secret
+  means the route refuses events rather than trusting them.
+- **Svix retries are the completion mechanism.** Liquidation is
+  asynchronous: with the market closed, sell orders queue until the next
+  open. Instead of building our own scheduler, the webhook answers 503
+  while positions remain, and Svix redelivers on its backoff schedule
+  (spanning about a day). Each retry advances the closure as far as the
+  market allows. Ops fallback for the pathological case (retries
+  exhausted over a long weekend): `scripts/close_account.py`.
+- **Reset sells everything** (owner's choice, 2026-08-27): cancel orders,
+  liquidate all positions, then journal every dollar back to the firm
+  sweep in ≤$100,000 chunks (the sandbox JNLC transaction limit). The
+  account ends at **$0 and the existing funding form takes over**, so the
+  user picks the next starting amount. With the market closed the reset
+  honestly reports "liquidating" until the sells can fill. Reset shares
+  the flatten-and-return-cash code with the webhook; only the webhook
+  retires the email and closes the account.
+
+**Consequences**: One new secret (`CLERK_WEBHOOK_SIGNING_SECRET`). The
+webhook cannot be registered until the API has a public URL, so it goes
+live with the Azure deployment; the code and tests land now. A reset
+started on a weekend stays "liquidating" until Monday's open — the UI
+must say so plainly rather than pretend it is instant.
