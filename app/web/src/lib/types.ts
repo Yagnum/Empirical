@@ -188,6 +188,30 @@ export type RealizedBySymbol = {
   trades: number;
 };
 
+/**
+ * What selling would sell (GET /pnl/preview?symbol=&qty=).
+ *
+ * The ledger names the open lots a sale of `qty` shares would consume and
+ * reports their cost; it deliberately does not compute the gain — the client
+ * multiplies (sell price − avg_unit_cost) × qty at display time, the same way
+ * the ticket already estimates proceeds.
+ *
+ * `cost_basis` and `avg_unit_cost` are null when no open lot covers the sale.
+ * `matched_qty` can be less than `qty` when the ledger's lots hold fewer
+ * shares than the user wants to sell (a history gap, or overselling); anything
+ * but matched_qty == qty means the basis is unknown, and a partial figure must
+ * never be shown as if it were whole.
+ */
+export type PnlPreview = {
+  symbol: string;
+  qty: string;
+  matched_qty: string;
+  cost_basis: string | null;
+  avg_unit_cost: string | null;
+  /** The matching rule the ledger used, e.g. "FIFO". Shown, never assumed. */
+  method: string;
+};
+
 export type StatementDocument = {
   id: string;
   type: string;

@@ -9,13 +9,20 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { buttonStyles } from "@/components/button";
+import { Delta } from "@/components/delta";
 import { MarketStatus } from "@/components/market-status";
 import { PaperTradingStamp } from "@/components/paper-trading";
 import { Segmented } from "@/components/segmented";
 import { submitOrder, type SubmitOrderState } from "@/lib/actions";
+import {
+  PNL_PREVIEW_STALE,
+  fetchPnlPreview,
+  isLedgerUnavailable,
+  keys,
+} from "@/lib/client-api";
 import { useMarketClock, useQuote } from "@/lib/hooks";
 import {
   checkOrderDraft,
@@ -30,6 +37,7 @@ import type {
   Order,
   OrderSide,
   OrderType,
+  PnlPreview,
   Quote,
   TimeInForce,
 } from "@/lib/types";
@@ -132,6 +140,35 @@ function TicketForm({
   const estimate = estimateNotional(qty, type === "limit" ? limitPrice : last);
   const power = toNumber(buyingPower);
 
+  /*
+    What selling these shares would lock in.
+
+    The ledger is asked once per (symbol, qty) — the checked draft's normalised
+    quantity, so "1." and "1" share a cache entry — and only while the sell
+    side is showing. It answers with the matched lots' cost, not the gain: the
+    multiplication below runs on every render, so the figure moves with the
+    polled quote exactly as the proceeds estimate does, without re-asking the
+    ledger. Lots change only when a trade fills, hence the long staleTime and
+    the invalidation on "placed" below.
+  */
+  const previewQty = check.valid ? check.order.qty : null;
+  const preview = useQuery({
+    queryKey: keys.pnlPreview(symbol, previewQty ?? ""),
+    queryFn: ({ signal }) => fetchPnlPreview(symbol, previewQty ?? "", signal),
+    enabled: side === "sell" && previewQty !== null,
+    staleTime: PNL_PREVIEW_STALE,
+    // "No ledger" is an answer, not a fault worth three more tries.
+    retry: (failureCount, error) =>
+      !isLedgerUnavailable(error) && failureCount < 2,
+  });
+  const sellGain = deriveSellGain({
+    side,
+    previewQty,
+    preview: preview.data,
+    failed: preview.isError,
+    price: type === "limit" ? limitPrice : last,
+  });
+
   // Moving to the review step moves focus with it, so a keyboard or screen
   // reader user is not left on a button that no longer exists.
   useEffect(() => {
@@ -143,6 +180,9 @@ function TicketForm({
   useEffect(() => {
     if (state.status === "placed") {
       void queryClient.invalidateQueries({ queryKey: ["orders"] });
+      // A fill changes which lots are open, so the cached cost basis is stale
+      // the moment an order is in flight.
+      void queryClient.invalidateQueries({ queryKey: ["pnl-preview"] });
     }
   }, [state.status, queryClient]);
 
@@ -187,6 +227,7 @@ function TicketForm({
           costLabel={costLabel}
           power={power}
           side={side}
+          sellGain={sellGain}
           error={state.status === "error" ? state.message : null}
           keyConflict={keyConflict}
           pending={pending}
@@ -280,6 +321,7 @@ function TicketForm({
             estimate={estimate}
             power={power}
             side={side}
+            sellGain={sellGain}
             reference={type === "limit" ? "your limit price" : "the last trade"}
           />
 
@@ -308,6 +350,100 @@ function TicketForm({
         </fieldset>
       )}
     </form>
+  );
+}
+
+/* ------------------------------------------------------------ sell gain -- */
+
+/**
+ * What the sell side of the estimate block can say about the outcome.
+ *
+ * "estimate" carries the figure and the basis it was measured against;
+ * "unknown" means the ledger answered but could not cover the whole sale
+ * (no open lot, or fewer matched shares than asked — a partial basis shown
+ * whole would be a lie). `null` means say nothing at all: buy side, invalid
+ * draft, no ledger, or a fetch that failed.
+ */
+type SellGain =
+  | { state: "estimate"; amount: number; avgUnitCost: string; method: string }
+  | { state: "unknown" };
+
+function deriveSellGain({
+  side,
+  previewQty,
+  preview,
+  failed,
+  price,
+}: {
+  side: OrderSide;
+  previewQty: string | null;
+  preview: PnlPreview | undefined;
+  failed: boolean;
+  price: string | null;
+}): SellGain | null {
+  // Not a sell, nothing checkable to sell, still loading, or the ledger is
+  // down or erroring — all of these hide the line rather than alarm anyone.
+  if (side !== "sell" || previewQty === null || preview === undefined || failed) {
+    return null;
+  }
+
+  const avg = toNumber(preview.avg_unit_cost);
+  const matched = toNumber(preview.matched_qty);
+  const asked = toNumber(preview.qty);
+  if (avg === null || matched === null || asked === null || matched !== asked) {
+    return { state: "unknown" };
+  }
+
+  // The same display arithmetic estimateNotional does for proceeds: this runs
+  // per render, so the figure ticks with the quote without another fetch.
+  const each = toNumber(price);
+  const shares = toNumber(previewQty);
+  if (each === null || shares === null) return null;
+
+  return {
+    state: "estimate",
+    amount: (each - avg) * shares,
+    avgUnitCost: preview.avg_unit_cost as string,
+    method: preview.method,
+  };
+}
+
+/**
+ * The estimate row for a sell, in both the edit face and the review face.
+ *
+ * The label carries the direction in words, the Delta carries it in sign,
+ * arrow, and colour, and the small print names the basis — so the figure is
+ * explainable ("against the cost of your oldest shares") and never claims
+ * more precision than a fill can promise. An unknown basis is a quiet note,
+ * not a zero: a made-up $0.00 would read as "you'd break even".
+ */
+function GainRow({ gain }: { gain: SellGain }) {
+  if (gain.state === "unknown") {
+    return (
+      <div className="flex items-baseline justify-between gap-4 py-1.5">
+        <dt className="text-ink-soft">Estimated gain</dt>
+        <dd className="text-[13px] text-ink-faint">Cost basis unknown</dd>
+      </div>
+    );
+  }
+
+  const basis =
+    gain.method === "FIFO"
+      ? "avg cost of your oldest shares (FIFO)"
+      : `avg cost of the shares sold (${gain.method})`;
+
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-4 py-1.5">
+      <dt className="text-ink-soft">
+        {gain.amount < 0 ? "Estimated loss" : "Estimated gain"}
+      </dt>
+      <dd>
+        <Delta amount={gain.amount} />
+      </dd>
+      <dd className="mt-0.5 w-full text-[12px] leading-relaxed text-ink-faint">
+        vs. {formatUsd(gain.avgUnitCost)} {basis}
+      </dd>
+    </div>
   );
 }
 
@@ -355,12 +491,14 @@ function Estimate({
   estimate,
   power,
   side,
+  sellGain,
   reference,
 }: {
   costLabel: string;
   estimate: number | null;
   power: number | null;
   side: OrderSide;
+  sellGain: SellGain | null;
   reference: string;
 }) {
   const remaining =
@@ -376,6 +514,7 @@ function Estimate({
           value={estimate === null ? "—" : formatUsd(estimate)}
           strong
         />
+        {sellGain !== null ? <GainRow gain={sellGain} /> : null}
         <Line term="Buying power" value={power === null ? "—" : formatUsd(power)} />
         {remaining !== null ? (
           <Line
@@ -432,6 +571,7 @@ function Review({
   costLabel,
   power,
   side,
+  sellGain,
   error,
   keyConflict,
   pending,
@@ -449,6 +589,7 @@ function Review({
   costLabel: string;
   power: number | null;
   side: OrderSide;
+  sellGain: SellGain | null;
   error: string | null;
   /** The submitted key was already spent — only editing can clear it. */
   keyConflict: boolean;
@@ -485,6 +626,9 @@ function Review({
           value={estimate === null ? "—" : formatUsd(estimate)}
           strong
         />
+        {/* The same figure the trader saw before confirming, still visible on
+            the face they confirm against. */}
+        {sellGain !== null ? <GainRow gain={sellGain} /> : null}
         {side === "buy" && power !== null && estimate !== null ? (
           <Line
             term="Left after this order"

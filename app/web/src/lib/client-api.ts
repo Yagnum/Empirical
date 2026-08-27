@@ -4,6 +4,7 @@ import type {
   Bar,
   MarketClock,
   Order,
+  PnlPreview,
   PortfolioHistory,
   Position,
   Quote,
@@ -128,6 +129,17 @@ export const fetchRealizedPl = (
   signal?: AbortSignal,
 ) => get<RealizedPl>("pnl/realized", { after, until }, signal);
 
+/*
+  What the ledger says a sell of this size would sell. The endpoint returns
+  the matched lots' cost, not the gain — the client does the display
+  arithmetic against whichever price the ticket is holding.
+*/
+export const fetchPnlPreview = (
+  symbol: string,
+  qty: string,
+  signal?: AbortSignal,
+) => get<PnlPreview>("pnl/preview", { symbol, qty }, signal);
+
 /** The API's own word for "there is no ledger behind me right now". */
 export const LEDGER_UNAVAILABLE = "ledger_unavailable";
 
@@ -159,6 +171,8 @@ export const keys = {
     ["activities", after, until] as const,
   realized: (after: string, until: string) =>
     ["realized", after, until] as const,
+  pnlPreview: (symbol: string, qty: string) =>
+    ["pnl-preview", symbol, qty] as const,
 };
 
 /*
@@ -172,6 +186,11 @@ export const ORDERS_INTERVAL = 10_000;
 export const CLOCK_INTERVAL = 60_000;
 /** While a reset is liquidating: how often to ask whether the account is flat. */
 export const RESET_POLL_INTERVAL = 10_000;
+/*
+  A sell's cost basis moves only when a trade fills, never on a timer, so the
+  preview is held fresh for minutes and invalidated when an order is placed.
+*/
+export const PNL_PREVIEW_STALE = 5 * 60_000;
 
 /** The message a person should see for a failed client fetch. */
 export function describeProxyError(error: unknown): string {
