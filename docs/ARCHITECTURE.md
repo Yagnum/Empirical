@@ -126,8 +126,8 @@ Swagger and Postman. `scripts/make_postman.py` regenerates the collection.
 
 - **Phase 0 — Foundations** ✅: scaffold, docs, health-check plumbing.
 - **Phase 1 — Identity & onboarding** ✅ verified live in a browser (2026-08-24): Clerk sign-in → Alpaca account created → $10,000 deposit accepted → dashboard renders. Journal deposits settle after the sandbox journal limits were raised (ALPACA-FUNDING.md §7).
-- **Phase 2 — Trading core**: symbol lookup + quotes, buy/sell by quantity, order status.
-- **Phase 3 — Dashboard**: positions, cash/buying power, portfolio value, order history.
+- **Phase 2 — Trading core** ✅ verified with live fills (2026-08-27): symbol lookup + quotes, buy/sell by quantity, order status, cancel.
+- **Phase 3 — Dashboard** ✅ verified with live fills (2026-08-27): positions, portfolio chart, order history, activities, CSV export.
 - **Phase 4 — Production polish**: deployment, Postgres (audit log, order idempotency, fills ledger for realized P/L — decided 2026-08-27), Clerk `user.deleted` offboarding webhook, reset-balance feature, production Clerk config.
 - **Phase 5+ — Paper territory**: market-hours awareness, Jupiter integration, ERR engine, gap-volatility research (`notebooks/`).
 
