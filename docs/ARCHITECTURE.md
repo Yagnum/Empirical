@@ -124,6 +124,13 @@ ADR-014 additions: `GET /pnl/realized` (FIFO realized profit), a
 `Idempotency-Key` header on `POST /orders`, and an `X-Request-ID` header on
 every response (join key to the `audit_log` table).
 
+ADR-015 additions: `POST /accounts/reset` (sell everything, return the
+cash to the firm sweep, land at $0 — each call reports `liquidating` or
+`reset` and the client polls by re-calling) and `POST /webhooks/clerk`
+(Clerk `user.deleted` → ADR-013 account closure; authenticated by Svix
+signature instead of a Clerk token, completed across Svix's retry
+schedule while liquidation waits for market open).
+
 Developer tools: `scripts/dev_token.py` mints a one-hour Clerk token for
 Swagger and Postman. `scripts/make_postman.py` regenerates the collection.
 Database: Neon Postgres (`development` branch for local work), migrations
@@ -135,7 +142,7 @@ via `uv run alembic upgrade head` in `app/api`.
 - **Phase 1 — Identity & onboarding** ✅ verified live in a browser (2026-08-24): Clerk sign-in → Alpaca account created → $10,000 deposit accepted → dashboard renders. Journal deposits settle after the sandbox journal limits were raised (ALPACA-FUNDING.md §7).
 - **Phase 2 — Trading core** ✅ verified with live fills (2026-08-27): symbol lookup + quotes, buy/sell by quantity, order status, cancel.
 - **Phase 3 — Dashboard** ✅ verified with live fills (2026-08-27): positions, portfolio chart, order history, activities, CSV export.
-- **Phase 4 — Production polish**: deployment to Azure, Postgres per ADR-014 (audit log, order idempotency, fills ledger for realized P/L — decided 2026-08-27), Clerk `user.deleted` offboarding webhook, reset-balance feature, production Clerk config.
+- **Phase 4 — Production polish**: Postgres per ADR-014 ✅ (audit log, order idempotency, fills ledger for realized P/L — live 2026-08-27); Clerk `user.deleted` offboarding webhook and reset-balance per ADR-015 ✅ (code + tests 2026-08-27; the webhook registers with Clerk once the API has a public URL); production Clerk config (checklist in `docs/PRODUCTION.md`); deployment to Azure.
 - **Phase 5+ — Paper territory**: market-hours awareness, Jupiter integration, ERR engine, gap-volatility research (`notebooks/`).
 
 ## Running locally
