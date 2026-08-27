@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 
+import { Delta } from "@/components/delta";
 import { MarketStatus } from "@/components/market-status";
 import { Panel, PanelHead } from "@/components/panel";
 import { SymbolSearch } from "@/components/symbol-search";
 import { getClock, getPositions } from "@/lib/api";
-import { formatPrice, formatQty } from "@/lib/money";
+import { formatPrice, formatQty, toNumber } from "@/lib/money";
 
 export const metadata: Metadata = { title: "Trade" };
 
@@ -65,11 +66,22 @@ export default async function TradePage() {
                         {position.symbol}
                       </span>
                       <span className="figure-nums ml-2 text-[13px] text-ink-faint">
-                        {formatQty(position.qty)} shares
+                        {formatQty(position.qty)}{" "}
+                        {Number(position.qty) === 1 ? "share" : "shares"}
                       </span>
                     </span>
-                    <span className="figure-nums text-[14px] text-ink-soft">
-                      {formatPrice(position.current_price)}
+                    {/* The pair a holder actually wants: what it costs now
+                        against what they paid, and the move between them. */}
+                    <span className="text-right">
+                      <span className="figure-nums block text-[14px] text-ink-soft">
+                        {formatPrice(position.current_price)}
+                      </span>
+                      <span className="mt-0.5 flex items-baseline justify-end gap-2 text-[12px]">
+                        <span className="figure-nums text-ink-faint">
+                          bought {formatPrice(position.avg_entry_price)}
+                        </span>
+                        <Delta amount={toNumber(position.unrealized_pl)} />
+                      </span>
                     </span>
                   </Link>
                 </li>

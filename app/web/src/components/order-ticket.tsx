@@ -427,9 +427,12 @@ function GainRow({ gain }: { gain: SellGain }) {
     );
   }
 
+  // Plain words on the ticket (owner's call, 2026-08-27): "oldest shares
+  // first" is the rule in English; the industry term FIFO stays in History's
+  // footnote, where the recorded figures live.
   const basis =
     gain.method === "FIFO"
-      ? "avg cost of your oldest shares (FIFO)"
+      ? "you paid (oldest shares first)"
       : `avg cost of the shares sold (${gain.method})`;
 
   return (
