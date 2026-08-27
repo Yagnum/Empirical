@@ -13,15 +13,18 @@ Layout (deliberately flat — a few small modules, easy to read end to end):
     models.py            the five SQLAlchemy tables of ADR-014
     audit.py             write one audit_log row per state-changing request
     ledger.py            fills -> FIFO lots -> realized P/L
-    routes_accounts.py   POST /accounts, GET /accounts/me
+    offboarding.py       flatten positions + return cash (webhook and reset)
+    routes_accounts.py   POST /accounts, GET /accounts/me, POST /accounts/reset
     routes_funding.py    POST /funding
     routes_market.py     GET /market/clock, /market/assets, /market/quotes, /market/bars
     routes_orders.py     POST/GET/DELETE /orders
     routes_portfolio.py  GET /positions, GET /portfolio/history
     routes_activity.py   GET /activities, /activities/export.csv, /documents
     routes_pnl.py        GET /pnl/realized
+    routes_webhooks.py   POST /webhooks/clerk
 
-Explore it at http://localhost:8000/docs. Everything except /health needs a
+Explore it at http://localhost:8000/docs. Everything except /health and
+/webhooks/clerk (which authenticates by Svix signature, not session) needs a
 Clerk session token: click **Authorize**, paste a token from
 `uv run python scripts/dev_token.py`, and the try-it-out buttons work.
 """
@@ -38,6 +41,7 @@ import routes_market
 import routes_orders
 import routes_pnl
 import routes_portfolio
+import routes_webhooks
 from config import settings
 
 app = FastAPI(
@@ -89,6 +93,7 @@ app.include_router(routes_orders.router)
 app.include_router(routes_portfolio.router)
 app.include_router(routes_activity.router)
 app.include_router(routes_pnl.router)
+app.include_router(routes_webhooks.router)
 
 
 @app.get("/health", tags=["health"])

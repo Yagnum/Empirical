@@ -559,6 +559,26 @@ def list_positions(account_id: str) -> list[dict]:
     return result if isinstance(result, list) else []
 
 
+def close_all_positions(account_id: str) -> list[dict]:
+    """DELETE /v1/trading/accounts/{id}/positions?cancel_orders=true.
+
+    Submits one closing order per open position; `cancel_orders=true` also
+    cancels every open order first, so a working buy cannot re-open a
+    position mid-liquidation. Alpaca answers with a per-position list of
+    order statuses — as HTTP 207 when some legs were refused — and any 2xx
+    means the batch was accepted. Callers poll `list_positions` to watch the
+    account go flat, so the per-leg statuses are informational here.
+
+    Docs: https://docs.alpaca.markets/reference/closeallpositionsforaccount
+    """
+    result = _request(
+        "DELETE",
+        f"/v1/trading/accounts/{account_id}/positions",
+        params={"cancel_orders": "true"},
+    )
+    return result if isinstance(result, list) else []
+
+
 def portfolio_history(account_id: str, period: str, timeframe: str) -> dict:
     """GET /v1/trading/accounts/{id}/account/portfolio/history.
 

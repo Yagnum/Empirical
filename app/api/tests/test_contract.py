@@ -138,6 +138,7 @@ def test_health_is_public(anon_client):
 @pytest.mark.parametrize(
     "method,path",
     [
+        ("POST", "/accounts/reset"),
         ("GET", "/market/clock"),
         ("GET", "/market/assets?q=AAPL"),
         ("GET", "/market/quotes/AAPL"),

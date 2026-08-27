@@ -1,7 +1,8 @@
-"""Account provisioning and balance lookup.
+"""Account provisioning, balance lookup, and the reset button.
 
-    POST /accounts     lazily create the signed-in user's Alpaca account
-    GET  /accounts/me  that account's status and balances
+    POST /accounts        lazily create the signed-in user's Alpaca account
+    GET  /accounts/me     that account's status and balances
+    POST /accounts/reset  sell everything, return the cash, land on $0
 """
 
 from __future__ import annotations
@@ -11,6 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 import alpaca
 import audit
 import clerk_auth
+import offboarding
+from config import settings
 
 router = APIRouter(tags=["accounts"])
 
@@ -104,6 +107,72 @@ def _provision(user_id: str) -> dict:
         "created": True,
         "status": str(account.get("status", "")),
     }
+
+
+@router.post("/accounts/reset")
+def reset_account(
+    request: Request,
+    user_id: str = Depends(clerk_auth.require_user_id),
+    account_id: str = Depends(clerk_auth.require_account_id),
+) -> dict:
+    """Sell everything, return the cash, leave the account at $0 (ADR-015).
+
+    The owner's chosen semantics: a reset liquidates whatever the user still
+    holds, then journals every dollar back to the firm sweep — the account
+    lands empty and the existing funding form picks the next starting
+    amount. Shares its flatten-and-return steps with the offboarding webhook
+    (`offboarding.py`); unlike the webhook it never retires the email or
+    closes the account.
+
+    Each call advances the flow as far as it can and reports where things
+    stand; the frontend polls by re-POSTing. The states:
+
+      {"state": "liquidating", "positions": N, "open_orders": M}
+          Closing orders submitted (cancelling open orders with them). With
+          the market closed those sells queue until the next open, so this
+          state can honestly persist for days — that is the market, not a
+          bug, and the UI should say so.
+      {"state": "reset", "returned": "<decimal string>"}
+          Flat, orders cancelled, cash journalled away. `"0"` when there
+          was nothing to return — calling reset twice is harmless.
+
+    Audited (ADR-014): a reset moves money and destroys positions.
+    """
+    with audit.audited(request, "account.reset", user_id=user_id, account_id=account_id) as entry:
+        try:
+            # Same guard and shape as POST /funding: journals (and orders)
+            # bounce off a not-yet-ACTIVE account with a bare 422, so name
+            # the real problem instead.
+            status = str(alpaca.get_account(account_id).get("status", "")).upper()
+            if status != "ACTIVE":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"account_not_active: the brokerage account is {status.lower() or 'not active'}",
+                )
+
+            begun = offboarding.begin_liquidation(account_id)
+            if begun is not None:
+                positions, open_orders = begun
+                entry.detail = f"liquidating positions={positions} open_orders={open_orders}"
+                return {"state": "liquidating", "positions": positions, "open_orders": open_orders}
+
+            cancelled = offboarding.cancel_open_orders(account_id)
+
+            cash = offboarding.account_cash(account_id)
+            if cash <= 0:
+                entry.detail = f"returned=0 orders_cancelled={cancelled}"
+                return {"state": "reset", "returned": "0"}
+            if not settings.alpaca_firm_account_id:
+                raise HTTPException(
+                    status_code=503,
+                    detail="reset_unavailable: ALPACA_FIRM_ACCOUNT_ID is not configured",
+                )
+            offboarding.return_cash_to_firm(account_id, cash)
+            returned = format(cash, "f")
+            entry.detail = f"returned={returned} orders_cancelled={cancelled}"
+            return {"state": "reset", "returned": returned}
+        except alpaca.AlpacaError as exc:
+            raise alpaca.http_error(exc) from exc
 
 
 @router.get("/accounts/me")

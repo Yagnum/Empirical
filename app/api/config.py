@@ -31,6 +31,11 @@ class Settings(BaseSettings):
 
     # --- Clerk (test instance) ---
     clerk_secret_key: str = ""
+    # Signing secret for the Clerk webhook endpoint (ADR-015). From the Clerk
+    # Dashboard -> Webhooks -> (endpoint) -> Signing Secret; starts with
+    # `whsec_`. Empty means POST /webhooks/clerk answers 503 rather than ever
+    # accepting an unsigned event.
+    clerk_webhook_signing_secret: str = ""
     # Accept session tokens that carry no `azp` claim. Only the Backend API
     # mints such tokens (scripts/dev_token.py, for Swagger and Postman), and
     # only a holder of CLERK_SECRET_KEY can call it. Set to false in
