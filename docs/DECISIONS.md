@@ -45,7 +45,7 @@ Render/Fly).
 
 ## ADR-003 — No database yet; Alpaca account ID lives in Clerk user metadata
 
-**Date**: 2026-08-24 · **Status**: Accepted
+**Date**: 2026-08-24 · **Status**: Accepted · **Partly superseded by ADR-014** (2026-08-27): the database now exists for our own records. The Clerk-metadata mapping stays.
 
 **Context**: The only state Phase 1 needs is the mapping Clerk user →
 Alpaca account ID. Orders, positions, and balances already live in Alpaca.
@@ -312,3 +312,38 @@ a KYC record is not a design.
 
 **Consequences**: Sign-up after a deletion works without tricks. One more
 ops script. The Phase 4 webhook has a specification.
+
+---
+
+## ADR-014 — The database arrives: Neon Postgres, SQLAlchemy 2, Alembic
+
+**Date**: 2026-08-27 · **Status**: Accepted
+
+**Context**: Three needs now exist that Alpaca cannot hold: an audit log,
+order idempotency, and a fills ledger for realized P/L (a sold position's
+cost basis vanishes from Alpaca at the moment of sale). Deployment target
+is Azure (family decision), so production will use Azure Database for
+PostgreSQL.
+
+**Decision**:
+- **Engine**: Postgres. Dev on **Neon** (hosted free tier — zero local
+  setup; chosen over local Docker), production on Azure Postgres. Same
+  engine both places; only `DATABASE_URL` changes.
+- **Access layer**: **SQLAlchemy 2** models + **Alembic** migrations —
+  the industry standard and the fuller lesson.
+- **First tables**:
+  - `audit_log` — one row per state-changing API request: who, what,
+    when, request id, outcome. Append-only.
+  - `order_intents` — client-generated idempotency key per order
+    submission; a retried request returns the original order instead of
+    placing a second one.
+  - `fills` — every fill copied from Alpaca (symbol, side, qty, price,
+    time, alpaca ids). Append-only; the raw material of the ledger.
+  - `lots` — open tax lots derived from buys; sells consume lots FIFO and
+    write realized P/L. This pair is the seed of the ERR-era double-entry
+    ledger (paper, Invariant 2).
+
+**Consequences**: A `DATABASE_URL` secret per environment. Migrations run
+at deploy time. The API grows a small persistence layer; Alpaca remains
+the system of record for balances and positions — our tables record what
+Alpaca forgets, never a second copy of what it remembers.
