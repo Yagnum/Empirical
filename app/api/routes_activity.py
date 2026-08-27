@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import csv
 import io
+import sys
 from datetime import date as date_cls
 from decimal import Decimal, InvalidOperation
 
@@ -29,6 +30,8 @@ from fastapi.responses import Response, StreamingResponse
 
 import alpaca
 import clerk_auth
+import db
+import ledger
 from config import settings
 
 router = APIRouter(tags=["activity"])
@@ -52,7 +55,12 @@ _ACTIVITY_KINDS = {
 
 # Statement columns, in the order they appear in the CSV. The JSON objects use
 # the same keys, so the export and the on-screen table can never drift.
-COLUMNS = ["id", "date", "type", "symbol", "side", "qty", "price", "net_amount", "description"]
+# `realized_pl` is the ADR-014 addition: it is filled only on a *sell* fill
+# that our ledger has matched to lots, and is empty everywhere else.
+COLUMNS = [
+    "id", "date", "type", "symbol", "side", "qty", "price", "net_amount",
+    "realized_pl", "description",
+]
 
 
 def _http_client() -> httpx.Client:
@@ -131,6 +139,9 @@ def normalize(activity: dict) -> dict:
             "qty": format(qty, "f") if qty is not None else None,
             "price": format(price, "f") if price is not None else None,
             "net_amount": _fill_net_amount(qty, price, side),
+            # Filled in by `_attach_realized` for sells the ledger has
+            # matched; null for buys and for anything not yet matched.
+            "realized_pl": None,
             "description": description or activity_type,
         }
 
@@ -150,16 +161,54 @@ def normalize(activity: dict) -> dict:
         "qty": format(qty, "f") if qty is not None else None,
         "price": format(per_share, "f") if per_share is not None else None,
         "net_amount": "" if activity.get("net_amount") is None else str(activity["net_amount"]),
+        # A deposit or a dividend realizes nothing; the key is present on
+        # every row so the frontend never has to check for its absence.
+        "realized_pl": None,
         "description": description,
     }
 
 
+def _attach_realized(account_id: str, rows: list[dict]) -> list[dict]:
+    """Fill in `realized_pl` on the sell fills our ledger has matched.
+
+    Best-effort by design (ADR-014): realized P/L is a number we derive on top
+    of Alpaca's feed, so a database that is down or unconfigured costs the
+    user a column, not their statement. Every row keeps the key with a null.
+    """
+    if not db.is_configured():
+        return rows
+    sells = [
+        row["id"]
+        for row in rows
+        if row["type"] == "fill" and str(row.get("side") or "").lower().startswith("sell")
+    ]
+    if not sells:
+        return rows
+    try:
+        with db.session_scope() as session:
+            realized = ledger.realized_by_activity_id(session, account_id, sells)
+    except Exception as exc:  # noqa: BLE001 - a missing column beats a 500
+        print(f"[activities] realized P/L lookup failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return rows
+    for row in rows:
+        amount = realized.get(row["id"])
+        if amount is not None:
+            row["realized_pl"] = ledger.money(amount)
+    return rows
+
+
 def _fetch(account_id: str, after: str | None, until: str | None, page_size: int) -> list[dict]:
+    # Bring our own ledger up to date before reading it, so a fill that
+    # settled since the last page load already has its realized P/L. This is
+    # cheap on the common path: `ledger.refresh` re-asks Alpaca at most once
+    # every few seconds per window, and the matcher exits on one indexed query
+    # when there is nothing new. It never raises.
+    ledger.refresh(account_id, after=after, until=until)
     try:
         rows = alpaca.list_activities(account_id, after=after, until=until, page_size=page_size)
     except alpaca.AlpacaError as exc:
         raise alpaca.http_error(exc) from exc
-    return [normalize(row) for row in rows]
+    return _attach_realized(account_id, [normalize(row) for row in rows])
 
 
 @router.get("/activities")
@@ -169,7 +218,13 @@ def activities(
     page_size: int = Query(100, ge=1, le=MAX_PAGE_SIZE),
     account_id: str = Depends(clerk_auth.require_account_id),
 ) -> list[dict]:
-    """Fills, deposits, journals, dividends and fees in one feed, newest first."""
+    """Fills, deposits, journals, dividends and fees in one feed, newest first.
+
+    Every row carries `realized_pl`. It is a decimal string only on a **sell**
+    fill that our FIFO ledger has matched to opening lots, and `null`
+    everywhere else - on buys, on cash movements, and on a sell whose opening
+    buy is older than the history we hold.
+    """
     return _fetch(account_id, after, until, page_size)
 
 

@@ -37,6 +37,18 @@ class Settings(BaseSettings):
     # production so every token must be pinned to the frontend origin.
     allow_tokens_without_azp: bool = True
 
+    # --- Database (ADR-014) ---
+    # Two URLs for the same Postgres. Neon hands out a *pooled* endpoint
+    # (hostname with `-pooler`, PgBouncer in transaction mode) and a *direct*
+    # one. The app uses the pooled URL — many short connection-per-request
+    # queries. Alembic uses the direct URL, because DDL and session-level
+    # state do not survive a transaction-mode pooler.
+    #
+    # Both default to "" so the API still boots and serves every non-database
+    # route with no database configured: db.py degrades instead of crashing.
+    database_url: str = ""
+    database_url_unpooled: str = ""
+
     # --- Misc ---
     jup_api_key: str = ""  # used in later crypto phases
     frontend_origin: str = "http://localhost:3000"

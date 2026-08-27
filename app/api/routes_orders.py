@@ -9,24 +9,44 @@ Every route acts on the signed-in user's own Alpaca account and no other:
 the account id comes from `clerk_auth.require_account_id`, never from the
 request body. That is the whole security model in one sentence.
 
+IDEMPOTENCY (ADR-014)
+    `POST /orders` accepts an optional `Idempotency-Key` header. Sending one
+    turns "place this order" into "make sure this order exists": the key is
+    recorded before the order reaches Alpaca, so a retry after a timeout - the
+    case that actually happens, where the client never learned whether the
+    first attempt worked - returns the original order instead of buying twice.
+    Reusing a key with a *different* body is a client bug and gets a 409.
+    No header means the pre-ADR-014 behaviour, unchanged.
+
 Docs: https://docs.alpaca.markets/reference/createorderforaccount
       https://docs.alpaca.markets/reference/getallordersforaccount
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 import alpaca
+import audit
 import clerk_auth
+import db
+from models import OrderIntent
 
 router = APIRouter(tags=["orders"])
 
 MAX_ORDERS = 500
+
+# Long enough for a UUID or a ULID with room to spare; short enough that the
+# header cannot be used as a smuggling channel. Matches the column width.
+MAX_IDEMPOTENCY_KEY = 255
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +156,81 @@ def _rejection(exc: alpaca.AlpacaError) -> HTTPException:
 
 
 # ---------------------------------------------------------------------------
+# Idempotency
+# ---------------------------------------------------------------------------
+
+
+def body_fingerprint(body: OrderRequest) -> str:
+    """A stable SHA-256 of the order, as Alpaca will receive it.
+
+    Hashing the *normalised* payload rather than the raw request bytes means
+    key whitespace and field order cannot make two identical orders look
+    different. It also means `"aapl"` and `"AAPL"` hash the same, because both
+    become `AAPL` before they leave us. A number written differently ("1" vs
+    "1.0") does not: it survives as written into the Alpaca payload, so it is
+    treated as a different body. Both are the conservative direction — the
+    only failure mode is a 409 telling an honest client to use a fresh key.
+    """
+    payload = json.dumps(body.to_alpaca(), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _replay(intent: OrderIntent, account_id: str) -> dict | None:
+    """The original order for a key we have already seen, or None to re-place.
+
+    None happens when the intent row exists but carries no order id: we
+    recorded the intent and then died before Alpaca answered. Nothing was
+    necessarily placed, so the retry proceeds — the safe direction for a
+    paper account, and the row gets its order id on the way through.
+    """
+    if not intent.alpaca_order_id:
+        return None
+    try:
+        return shape_order(alpaca.get_order(account_id, intent.alpaca_order_id))
+    except alpaca.AlpacaError as exc:
+        raise alpaca.http_error(exc) from exc
+
+
+def _claim_key(
+    session: Session, key: str, user_id: str, fingerprint: str, account_id: str
+) -> tuple[OrderIntent, dict | None]:
+    """Record the intent, or recognise one we already hold.
+
+    Committed *before* the Alpaca call, on purpose. The whole point is to
+    survive the crash between "we sent the order" and "the client heard back",
+    and a row that is only committed afterwards would not.
+
+    A concurrent duplicate loses the primary-key insert rather than a
+    read-then-write race, so two simultaneous retries of the same key still
+    place exactly one order.
+    """
+    intent = session.get(OrderIntent, key)
+    if intent is None:
+        intent = OrderIntent(
+            idempotency_key=key,
+            clerk_user_id=user_id,
+            body_sha256=fingerprint,
+            alpaca_order_id=None,
+        )
+        try:
+            session.add(intent)
+            session.commit()
+            return intent, None
+        except IntegrityError:
+            session.rollback()
+            intent = session.get(OrderIntent, key)
+            if intent is None:  # pragma: no cover - only a deleted row gets here
+                raise
+
+    # A key belongs to the user who minted it. Another user presenting it is
+    # either confused or probing, and in both cases must not learn anything
+    # about somebody else's order.
+    if intent.clerk_user_id != user_id or intent.body_sha256 != fingerprint:
+        raise HTTPException(status_code=409, detail="idempotency_key_reused")
+    return intent, _replay(intent, account_id)
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -143,18 +238,55 @@ def _rejection(exc: alpaca.AlpacaError) -> HTTPException:
 @router.post("/orders")
 def place_order(
     body: OrderRequest,
+    request: Request,
+    idempotency_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        max_length=MAX_IDEMPOTENCY_KEY,
+        description=(
+            "Optional. A client-generated key (a UUID is ideal). Retrying with "
+            "the same key returns the original order instead of placing a "
+            "second one; reusing it with a different body is a 409."
+        ),
+    ),
+    user_id: str = Depends(clerk_auth.require_user_id),
     account_id: str = Depends(clerk_auth.require_account_id),
+    session: Session | None = Depends(db.get_session),
 ) -> dict:
     """Submit an order and return it in whatever state Alpaca accepted it.
 
     While the market is closed a `day` order sits in `accepted` until the
     next open; that is normal, not an error.
+
+    With an `Idempotency-Key` header this becomes safe to retry: the second
+    call returns the first call's order, and Alpaca sees one order.
     """
-    try:
-        order = alpaca.create_order(account_id, body.to_alpaca())
-    except alpaca.AlpacaError as exc:
-        raise _rejection(exc) from exc
-    return shape_order(order)
+    with audit.audited(request, "order.place", user_id=user_id, account_id=account_id) as entry:
+        entry.detail = f"{body.side} {format(body.qty, 'f')} {body.symbol} {body.type}"
+
+        intent: OrderIntent | None = None
+        if idempotency_key and session is not None:
+            intent, replayed = _claim_key(
+                session, idempotency_key, user_id, body_fingerprint(body), account_id
+            )
+            if replayed is not None:
+                entry.detail = f"{entry.detail} (idempotent replay)"
+                return replayed
+        elif idempotency_key:
+            # Honouring the header needs somewhere to write the key. Rather
+            # than pretend, say so in the audit trail and place the order.
+            entry.detail = f"{entry.detail} (idempotency-key ignored: no database)"
+
+        try:
+            order = alpaca.create_order(account_id, body.to_alpaca())
+        except alpaca.AlpacaError as exc:
+            raise _rejection(exc) from exc
+
+        shaped = shape_order(order)
+        if intent is not None:
+            intent.alpaca_order_id = shaped["id"] or None
+            session.commit()
+        return shaped
 
 
 @router.get("/orders")
@@ -188,6 +320,8 @@ def get_order(
 @router.delete("/orders/{order_id}")
 def cancel_order(
     order_id: str,
+    request: Request,
+    user_id: str = Depends(clerk_auth.require_user_id),
     account_id: str = Depends(clerk_auth.require_account_id),
 ) -> dict:
     """Cancel a working order.
@@ -199,20 +333,23 @@ def cancel_order(
     with 422, which we surface as 409, the honest "conflicts with current
     state" status.
     """
-    try:
-        alpaca.cancel_order(account_id, order_id)
-    except alpaca.AlpacaError as exc:
-        if exc.status_code == 404:
-            raise HTTPException(status_code=404, detail="order_not_found") from exc
-        if exc.status_code in (409, 422):
-            raise HTTPException(status_code=409, detail="order_not_cancelable") from exc
-        raise alpaca.http_error(exc) from exc
+    with audit.audited(request, "order.cancel", user_id=user_id, account_id=account_id) as entry:
+        entry.detail = f"order {order_id}"
+        try:
+            alpaca.cancel_order(account_id, order_id)
+        except alpaca.AlpacaError as exc:
+            if exc.status_code == 404:
+                raise HTTPException(status_code=404, detail="order_not_found") from exc
+            if exc.status_code in (409, 422):
+                raise HTTPException(status_code=409, detail="order_not_cancelable") from exc
+            raise alpaca.http_error(exc) from exc
 
-    try:
-        order = alpaca.get_order(account_id, order_id)
-        status = _text(order.get("status")) or "pending_cancel"
-    except alpaca.AlpacaError:
-        # The cancel itself succeeded; a failed read-back must not turn a
-        # successful cancellation into an error for the user.
-        status = "pending_cancel"
-    return {"id": order_id, "status": status}
+        try:
+            order = alpaca.get_order(account_id, order_id)
+            status = _text(order.get("status")) or "pending_cancel"
+        except alpaca.AlpacaError:
+            # The cancel itself succeeded; a failed read-back must not turn a
+            # successful cancellation into an error for the user.
+            status = "pending_cancel"
+        entry.detail = f"order {order_id} -> {status}"
+        return {"id": order_id, "status": status}

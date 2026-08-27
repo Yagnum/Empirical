@@ -56,6 +56,7 @@ FOLDERS = [
     ("orders", "4 - Orders"),
     ("portfolio", "5 - Portfolio"),
     ("activity", "6 - Activity & statements"),
+    ("pnl", "7 - Realized P/L"),
 ]
 
 # Request bodies. The schema says "an OrderRequest goes here"; only a human
@@ -87,6 +88,8 @@ EXAMPLE_VALUES = {
     "page_size": "100",
     "after": "2026-08-01",
     "until": "2026-08-31",
+    # Any stable string works; a UUID is what a real client would send.
+    "Idempotency-Key": "11111111-2222-3333-4444-555555555555",
 }
 
 # Route-specific overrides where the generic value above is wrong.
@@ -170,6 +173,21 @@ def build_request(path: str, method: str, operation: dict) -> dict:
         "url": build_url(path, operation, method),
         "description": (operation.get("description") or operation.get("summary") or "").strip(),
     }
+
+    # Header parameters the schema declares (today: Idempotency-Key on
+    # POST /orders). Shipped disabled, so the request works untouched and the
+    # reader can still see the header exists and tick it on.
+    for parameter in operation.get("parameters", []):
+        if parameter.get("in") != "header":
+            continue
+        request["header"].append(
+            {
+                "key": parameter["name"],
+                "value": EXAMPLE_VALUES.get(parameter["name"], ""),
+                "description": parameter.get("description") or "",
+                "disabled": not parameter.get("required", False),
+            }
+        )
 
     body = EXAMPLE_BODIES.get((method, path))
     if body is not None:

@@ -1,0 +1,17 @@
+Database migrations for the Yagnum API (ADR-014).
+
+Run everything from `app/api`:
+
+    uv run alembic current                          which revision is applied
+    uv run alembic upgrade head                     apply what is pending
+    uv run alembic revision --autogenerate -m "..." write a new one from models.py
+    uv run alembic downgrade -1                     step back one
+
+The connection string is NOT in alembic.ini. `env.py` reads
+DATABASE_URL_UNPOOLED from the repo-root `.env` — Neon's *direct* endpoint,
+because DDL and a transaction-mode pooler do not mix. The app itself runs on
+the pooled DATABASE_URL; see db.py.
+
+After autogenerating, read the generated file before applying it. Alembic
+compares metadata to the live database and is good at it, but it cannot know
+that a rename was a rename rather than a drop plus an add.

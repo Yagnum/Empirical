@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Query
 
 import alpaca
 import clerk_auth
+import ledger
 
 router = APIRouter(tags=["portfolio"])
 
@@ -45,7 +46,15 @@ def _series(values) -> list[str]:
 
 @router.get("/positions")
 def positions(account_id: str = Depends(clerk_auth.require_account_id)) -> list[dict]:
-    """Current holdings. An empty list is the normal state of a new account."""
+    """Current holdings. An empty list is the normal state of a new account.
+
+    The response is Alpaca's, unchanged. The ledger sync at the top is a side
+    effect: this route is polled by the dashboard, which makes it the cheapest
+    place to keep `fills`/`lots` current so that realized P/L is already
+    computed by the time anyone asks for it. It never raises and never delays
+    the answer by more than one activities call.
+    """
+    ledger.refresh(account_id)
     try:
         rows = alpaca.list_positions(account_id)
     except alpaca.AlpacaError as exc:

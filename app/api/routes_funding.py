@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 import alpaca
+import audit
 import clerk_auth
 
 router = APIRouter(tags=["funding"])
@@ -33,8 +34,10 @@ class FundingRequest(BaseModel):
 @router.post("/funding")
 def fund(
     body: FundingRequest,
+    request: Request,
     user_id: str = Depends(clerk_auth.require_user_id),
 ) -> dict:
+    """Deposit virtual cash. Audited (ADR-014): money moving is worth a row."""
     user = clerk_auth.get_user(user_id)
     account_id = clerk_auth.get_alpaca_account_id(user)
     if not account_id:
@@ -43,27 +46,30 @@ def fund(
     given_name, family_name = clerk_auth.names(user)
     amount = body.amount.quantize(Decimal("0.01"))
 
-    # A brand-new account sits in SUBMITTED for a short time before Alpaca
-    # activates it, and Alpaca refuses journals until then with a bare 422.
-    # Say what is actually happening so the UI can ask the user to wait.
-    try:
-        status = str(alpaca.get_account(account_id).get("status", "")).upper()
-    except alpaca.AlpacaError as exc:
-        raise alpaca.http_error(exc) from exc
-    if status != "ACTIVE":
-        raise HTTPException(
-            status_code=409,
-            detail=f"account_not_active: the brokerage account is {status.lower() or 'not active'} yet",
-        )
+    with audit.audited(request, "funding.deposit", user_id=user_id, account_id=account_id) as entry:
+        entry.detail = f"amount={format(amount, 'f')}"
 
-    try:
-        transfer = alpaca.fund_account(account_id, amount, f"{given_name} {family_name}")
-    except alpaca.AlpacaError as exc:
-        raise alpaca.http_error(exc) from exc
+        # A brand-new account sits in SUBMITTED for a short time before Alpaca
+        # activates it, and Alpaca refuses journals until then with a bare 422.
+        # Say what is actually happening so the UI can ask the user to wait.
+        try:
+            status = str(alpaca.get_account(account_id).get("status", "")).upper()
+        except alpaca.AlpacaError as exc:
+            raise alpaca.http_error(exc) from exc
+        if status != "ACTIVE":
+            raise HTTPException(
+                status_code=409,
+                detail=f"account_not_active: the brokerage account is {status.lower() or 'not active'} yet",
+            )
 
-    return {
-        "transfer_id": str(transfer.get("id", "")),
-        "status": str(transfer.get("status", "")),
-        # Alpaca's own decimal string, passed through untouched.
-        "amount": str(transfer.get("amount") or format(amount, "f")),
-    }
+        try:
+            transfer = alpaca.fund_account(account_id, amount, f"{given_name} {family_name}")
+        except alpaca.AlpacaError as exc:
+            raise alpaca.http_error(exc) from exc
+
+        return {
+            "transfer_id": str(transfer.get("id", "")),
+            "status": str(transfer.get("status", "")),
+            # Alpaca's own decimal string, passed through untouched.
+            "amount": str(transfer.get("amount") or format(amount, "f")),
+        }

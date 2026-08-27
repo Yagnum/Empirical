@@ -13,11 +13,16 @@ description. Pretty fixtures hide real bugs.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import httpx
 import pytest
+import sqlalchemy as sa
 
 import alpaca
+import ledger
 import routes_activity
+from models import AuditLog, Fill, Lot, OrderIntent, RealizedPnl
 
 # --- fixtures copied from live sandbox responses ---------------------------
 
@@ -469,6 +474,8 @@ def test_activities_normalizes_both_alpaca_shapes(client, monkeypatch):
         "price": "313.45",
         # 2 x 313.45, negative because buying spends cash. Decimal, not float.
         "net_amount": "-626.90",
+        # ADR-014 added this key to every row. A buy realizes nothing.
+        "realized_pl": None,
         "description": "buy 2 AAPL @ 313.45",
     }
     assert body[1] == {
@@ -480,6 +487,7 @@ def test_activities_normalizes_both_alpaca_shapes(client, monkeypatch):
         "qty": None,
         "price": None,
         "net_amount": "10000",
+        "realized_pl": None,
         # Sandbox sends an empty description; we say something truthful.
         "description": "JNLC executed",
     }
@@ -524,13 +532,13 @@ def test_csv_export(client, monkeypatch):
         'attachment; filename="yagnum-activity-2026-08-01-2026-08-26.csv"'
     )
     lines = response.text.strip().splitlines()
-    assert lines[0] == "id,date,type,symbol,side,qty,price,net_amount,description"
+    assert lines[0] == "id,date,type,symbol,side,qty,price,net_amount,realized_pl,description"
     assert lines[1] == (
-        "20260826000000000::aaaa1111,2026-08-26,fill,AAPL,buy,2,313.45,-626.90,buy 2 AAPL @ 313.45"
+        "20260826000000000::aaaa1111,2026-08-26,fill,AAPL,buy,2,313.45,-626.90,,buy 2 AAPL @ 313.45"
     )
     # Nulls become empty cells, not the string "None".
     assert lines[2].startswith("20260824000000000::89c772bb-9d9c-4c7b-8ad9-66362bfab759,"
-                              "2026-08-24,journal,,,,,10000,")
+                              "2026-08-24,journal,,,,,10000,,")
 
 
 def test_documents(client, monkeypatch):
@@ -626,6 +634,338 @@ def test_phase_one_routes_are_unchanged(client, monkeypatch):
         "portfolio_value": "10000",
         "equity": "10000",
     }
+
+
+# ---------------------------------------------------------------------------
+# ADR-014: audit log, idempotency, and the FIFO ledger
+#
+# These run against a real Postgres schema in the Neon development branch
+# (see tests/conftest.py for why not SQLite). Alpaca is still mocked; the
+# database is not.
+# ---------------------------------------------------------------------------
+
+
+def fill_activity(activity_id: str, symbol: str, side: str, qty: str, price: str, when: str) -> dict:
+    """One FILL activity, shaped exactly as Alpaca sends it."""
+    return {
+        "id": activity_id,
+        "account_id": "acct-test-0001",
+        "activity_type": "FILL",
+        "transaction_time": when,
+        "type": "fill",
+        "price": price,
+        "qty": qty,
+        "side": side,
+        "symbol": symbol,
+        "order_id": f"ord-{activity_id}",
+        "cum_qty": qty,
+        "leaves_qty": "0",
+        "order_status": "filled",
+    }
+
+
+def feed(monkeypatch, activities: list[dict]) -> None:
+    """Make `alpaca.list_activities` return these, newest first as Alpaca does."""
+    ordered = sorted(activities, key=lambda row: row["transaction_time"], reverse=True)
+    monkeypatch.setattr(
+        alpaca, "list_activities",
+        lambda a, after=None, until=None, page_size=100: list(ordered),
+    )
+
+
+def run_ledger(session, activities: list[dict], monkeypatch) -> None:
+    feed(monkeypatch, activities)
+    ledger.sync_fills(session, "acct-test-0001")
+    ledger.match_lots(session, "acct-test-0001")
+    session.commit()
+
+
+# --- audit log -------------------------------------------------------------
+
+
+def test_audit_row_written_when_an_order_is_placed(db_client, session, monkeypatch):
+    monkeypatch.setattr(alpaca, "create_order", lambda a, p: ORDER)
+    response = db_client.post(
+        "/orders", json={"symbol": "AAPL", "qty": "1", "side": "buy", "type": "market"}
+    )
+    assert response.status_code == 200
+
+    row = session.scalars(sa.select(AuditLog)).one()
+    assert row.action == "order.place"
+    assert row.outcome == "ok"
+    assert row.status_code == 200
+    assert row.method == "POST"
+    assert row.path == "/orders"
+    assert row.clerk_user_id == "user_test"
+    assert row.alpaca_account_id == "acct-test-0001"
+    assert "buy 1 AAPL market" in row.detail
+    # The correlation id the middleware stamped, echoed to the caller too.
+    assert row.request_id and row.request_id == response.headers["x-request-id"]
+
+
+def test_audit_row_written_when_an_order_is_cancelled(db_client, session, monkeypatch):
+    monkeypatch.setattr(alpaca, "cancel_order", lambda a, o: None)
+    monkeypatch.setattr(alpaca, "get_order", lambda a, o: {**ORDER, "status": "pending_cancel"})
+    assert db_client.delete(f"/orders/{ORDER['id']}").status_code == 200
+
+    row = session.scalars(sa.select(AuditLog)).one()
+    assert (row.action, row.outcome, row.status_code) == ("order.cancel", "ok", 200)
+    assert row.detail.endswith("pending_cancel")
+
+
+def test_audit_records_the_failure_too(db_client, session, monkeypatch):
+    """A rejected order is exactly the request you most want a row for."""
+    monkeypatch.setattr(alpaca, "create_order", _raiser(403, "insufficient buying power"))
+    response = db_client.post(
+        "/orders", json={"symbol": "AAPL", "qty": "99999", "side": "buy", "type": "market"}
+    )
+    assert response.status_code == 400
+
+    row = session.scalars(sa.select(AuditLog)).one()
+    assert (row.action, row.outcome, row.status_code) == ("order.place", "error", 400)
+    assert row.detail == "alpaca_rejected: insufficient buying power"
+
+
+def test_a_broken_audit_write_never_breaks_the_order(db_client, monkeypatch):
+    """The rule from ADR-014: Alpaca accepted the order, so the user gets a 200."""
+    monkeypatch.setattr(alpaca, "create_order", lambda a, p: ORDER)
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("database on fire")
+
+    # Break the audit row itself, not the connection: the order route also
+    # holds a session, and a dead engine would prove nothing about audit.
+    monkeypatch.setattr("audit.AuditLog", explode)
+    response = db_client.post(
+        "/orders", json={"symbol": "AAPL", "qty": "1", "side": "buy", "type": "market"}
+    )
+    assert response.status_code == 200
+    assert response.json()["id"] == ORDER["id"]
+
+
+# --- idempotency -----------------------------------------------------------
+
+
+def test_idempotent_replay_returns_the_same_order_and_places_one(db_client, session, monkeypatch):
+    placed = []
+
+    def fake_create(account_id, payload):
+        placed.append(payload)
+        return ORDER
+
+    monkeypatch.setattr(alpaca, "create_order", fake_create)
+    monkeypatch.setattr(alpaca, "get_order", lambda a, o: ORDER)
+
+    body = {"symbol": "AAPL", "qty": "1", "side": "buy", "type": "limit",
+            "limit_price": "1.00", "time_in_force": "day"}
+    headers = {"Idempotency-Key": "key-abc-123"}
+
+    first = db_client.post("/orders", json=body, headers=headers)
+    second = db_client.post("/orders", json=body, headers=headers)
+
+    assert first.status_code == second.status_code == 200
+    assert first.json() == second.json()
+    # The whole point: the broker saw one order, not two.
+    assert len(placed) == 1
+
+    intent = session.get(OrderIntent, "key-abc-123")
+    assert intent.alpaca_order_id == ORDER["id"]
+    assert intent.clerk_user_id == "user_test"
+
+
+def test_reusing_a_key_with_a_different_body_is_409(db_client, monkeypatch):
+    monkeypatch.setattr(alpaca, "create_order", lambda a, p: ORDER)
+    monkeypatch.setattr(alpaca, "get_order", lambda a, o: ORDER)
+    headers = {"Idempotency-Key": "key-xyz-789"}
+
+    assert db_client.post(
+        "/orders",
+        json={"symbol": "AAPL", "qty": "1", "side": "buy", "type": "market"},
+        headers=headers,
+    ).status_code == 200
+
+    clash = db_client.post(
+        "/orders",
+        json={"symbol": "MSFT", "qty": "1", "side": "buy", "type": "market"},
+        headers=headers,
+    )
+    assert clash.status_code == 409
+    assert clash.json() == {"detail": "idempotency_key_reused"}
+
+
+def test_no_header_means_no_intent_row(db_client, session, monkeypatch):
+    """The pre-ADR-014 path is untouched: two calls, two orders, no rows."""
+    placed = []
+    monkeypatch.setattr(alpaca, "create_order", lambda a, p: placed.append(p) or ORDER)
+    body = {"symbol": "AAPL", "qty": "1", "side": "buy", "type": "market"}
+    db_client.post("/orders", json=body)
+    db_client.post("/orders", json=body)
+    assert len(placed) == 2
+    assert session.scalars(sa.select(OrderIntent)).all() == []
+
+
+# --- FIFO matching ---------------------------------------------------------
+
+
+def test_fifo_buy_buy_sell(session, monkeypatch):
+    """buy 2 @ 10, buy 1 @ 12, sell 2 @ 15 -> realized exactly 10."""
+    run_ledger(
+        session,
+        [
+            fill_activity("a1", "AAPL", "buy", "2", "10", "2026-08-24T14:00:00Z"),
+            fill_activity("a2", "AAPL", "buy", "1", "12", "2026-08-25T14:00:00Z"),
+            fill_activity("a3", "AAPL", "sell", "2", "15", "2026-08-26T14:00:00Z"),
+        ],
+        monkeypatch,
+    )
+
+    realized = session.scalars(sa.select(RealizedPnl)).one()
+    assert realized.qty == Decimal("2")
+    assert realized.proceeds == Decimal("30")
+    assert realized.cost_basis == Decimal("20")
+    assert realized.realized == Decimal("10")
+    assert realized.method == "FIFO"
+    assert ledger.money(realized.realized) == "10.00"
+
+    lots = session.scalars(sa.select(Lot).order_by(Lot.opened_at)).all()
+    # The first lot is spent and stamped; the second is untouched at 1 @ 12.
+    assert [lot.qty_open for lot in lots] == [Decimal("0"), Decimal("1")]
+    assert lots[0].closed_at is not None and lots[1].closed_at is None
+    assert lots[0].qty_initial == Decimal("2") and lots[0].unit_cost == Decimal("10")
+    assert lots[1].unit_cost == Decimal("12")
+
+
+def test_fifo_partial_lot_consumption(session, monkeypatch):
+    """A sell that eats one whole lot and part of the next.
+
+    buy 2 @ 10, buy 2 @ 12, sell 3 @ 15
+      cost basis = 2x10 + 1x12 = 32, proceeds = 3x15 = 45, realized = 13
+      and the second lot is left holding exactly 1 share at its own cost.
+    """
+    run_ledger(
+        session,
+        [
+            fill_activity("b1", "MSFT", "buy", "2", "10", "2026-08-24T14:00:00Z"),
+            fill_activity("b2", "MSFT", "buy", "2", "12", "2026-08-25T14:00:00Z"),
+            fill_activity("b3", "MSFT", "sell", "3", "15", "2026-08-26T14:00:00Z"),
+        ],
+        monkeypatch,
+    )
+
+    realized = session.scalars(sa.select(RealizedPnl)).one()
+    assert (realized.qty, realized.proceeds, realized.cost_basis, realized.realized) == (
+        Decimal("3"), Decimal("45"), Decimal("32"), Decimal("13")
+    )
+
+    lots = session.scalars(sa.select(Lot).order_by(Lot.opened_at)).all()
+    assert [lot.qty_open for lot in lots] == [Decimal("0"), Decimal("1")]
+    assert lots[1].qty_initial == Decimal("2")  # the original purchase is preserved
+    assert lots[1].closed_at is None
+
+
+def test_fifo_survives_sub_cent_prices(session, monkeypatch):
+    """The ADR-010 case: 3 x 0.1 is 0.3, not 0.30000000000000004."""
+    run_ledger(
+        session,
+        [
+            fill_activity("c1", "PENY", "buy", "3", "0.1", "2026-08-24T14:00:00Z"),
+            fill_activity("c2", "PENY", "sell", "3", "0.2", "2026-08-25T14:00:00Z"),
+        ],
+        monkeypatch,
+    )
+    realized = session.scalars(sa.select(RealizedPnl)).one()
+    assert realized.cost_basis == Decimal("0.3")
+    assert realized.proceeds == Decimal("0.6")
+    assert realized.realized == Decimal("0.3")
+
+
+def test_ledger_sync_and_match_are_idempotent(session, monkeypatch):
+    activities = [
+        fill_activity("d1", "AAPL", "buy", "2", "10", "2026-08-24T14:00:00Z"),
+        fill_activity("d2", "AAPL", "sell", "1", "15", "2026-08-25T14:00:00Z"),
+    ]
+    run_ledger(session, activities, monkeypatch)
+    run_ledger(session, activities, monkeypatch)  # a second page load
+    run_ledger(session, activities, monkeypatch)  # and a third
+
+    assert len(session.scalars(sa.select(Fill)).all()) == 2
+    assert len(session.scalars(sa.select(Lot)).all()) == 1
+    assert len(session.scalars(sa.select(RealizedPnl)).all()) == 1
+    # The lot was decremented once, not once per run.
+    assert session.scalars(sa.select(Lot)).one().qty_open == Decimal("1")
+
+
+def test_a_sell_with_no_opening_buy_is_left_unmatched(session, monkeypatch):
+    """Better a null than a fabricated cost basis of zero (see ledger.py)."""
+    run_ledger(
+        session,
+        [fill_activity("e1", "TSLA", "sell", "1", "15", "2026-08-25T14:00:00Z")],
+        monkeypatch,
+    )
+    assert len(session.scalars(sa.select(Fill)).all()) == 1
+    assert session.scalars(sa.select(RealizedPnl)).all() == []
+
+
+# --- the contract the frontend sees ----------------------------------------
+
+
+LEDGER_FEED = [
+    fill_activity("f-buy", "AAPL", "buy", "2", "10", "2026-08-24T14:00:00Z"),
+    fill_activity("f-buy2", "AAPL", "buy", "1", "12", "2026-08-25T14:00:00Z"),
+    fill_activity("f-sell", "AAPL", "sell", "2", "15", "2026-08-26T14:00:00Z"),
+]
+
+
+def test_activities_carry_realized_pl_on_sells(db_client, monkeypatch):
+    feed(monkeypatch, LEDGER_FEED)
+    rows = {row["id"]: row for row in db_client.get("/activities").json()}
+    assert rows["f-sell"]["realized_pl"] == "10.00"
+    # Every other row still has the key, and it is null.
+    assert rows["f-buy"]["realized_pl"] is None
+    assert rows["f-buy2"]["realized_pl"] is None
+
+
+def test_csv_export_includes_realized_pl(db_client, monkeypatch):
+    feed(monkeypatch, LEDGER_FEED)
+    response = db_client.get("/activities/export.csv")
+    lines = response.text.strip().splitlines()
+    assert lines[0] == "id,date,type,symbol,side,qty,price,net_amount,realized_pl,description"
+    sell = next(line for line in lines if line.startswith("f-sell,"))
+    assert sell == "f-sell,2026-08-26,fill,AAPL,sell,2,15,30.00,10.00,sell 2 AAPL @ 15"
+
+
+def test_realized_pnl_route(db_client, monkeypatch):
+    feed(monkeypatch, LEDGER_FEED)
+    assert db_client.get("/pnl/realized").json() == {
+        "total": "10.00",
+        "by_symbol": [{"symbol": "AAPL", "realized": "10.00", "trades": 1}],
+        "method": "FIFO",
+    }
+
+
+def test_realized_pnl_of_an_account_that_never_sold(db_client, monkeypatch):
+    feed(monkeypatch, [LEDGER_FEED[0]])
+    assert db_client.get("/pnl/realized").json() == {
+        "total": "0.00", "by_symbol": [], "method": "FIFO"
+    }
+
+
+def test_realized_pnl_needs_a_database(client, monkeypatch):
+    """With no DATABASE_URL the honest answer is 503, not a zero total."""
+    assert client.get("/pnl/realized").status_code == 503
+
+
+def test_everything_still_works_with_no_database(client, monkeypatch):
+    """The degrade path: no DATABASE_URL, so no audit, no ledger, no crash."""
+    monkeypatch.setattr(alpaca, "create_order", lambda a, p: ORDER)
+    feed(monkeypatch, LEDGER_FEED)
+    placed = client.post(
+        "/orders",
+        json={"symbol": "AAPL", "qty": "1", "side": "buy", "type": "market"},
+        headers={"Idempotency-Key": "ignored-without-a-database"},
+    )
+    assert placed.status_code == 200
+    assert all(row["realized_pl"] is None for row in client.get("/activities").json())
 
 
 def test_bars_helper_asks_far_enough_back():

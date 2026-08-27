@@ -6,9 +6,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 import alpaca
+import audit
 import clerk_auth
 
 router = APIRouter(tags=["accounts"])
@@ -25,8 +26,24 @@ def _money(value) -> str:
 
 
 @router.post("/accounts")
-def provision_account(user_id: str = Depends(clerk_auth.require_user_id)) -> dict:
-    """Idempotent: one Alpaca account per Clerk user, created on first call."""
+def provision_account(
+    request: Request,
+    user_id: str = Depends(clerk_auth.require_user_id),
+) -> dict:
+    """Idempotent: one Alpaca account per Clerk user, created on first call.
+
+    Audited (ADR-014): this is the one request that brings a brokerage account
+    into existence, so "who opened this account, and when" is worth a row.
+    """
+    with audit.audited(request, "account.provision", user_id=user_id) as entry:
+        result = _provision(user_id)
+        entry.alpaca_account_id = result["alpaca_account_id"]
+        entry.detail = f"created={result['created']} status={result['status']}"
+        return result
+
+
+def _provision(user_id: str) -> dict:
+    """The provisioning itself, kept separate so the route reads as one line."""
     user = clerk_auth.get_user(user_id)
     existing_metadata = clerk_auth.private_metadata(user)
     existing_id = clerk_auth.get_alpaca_account_id(user)

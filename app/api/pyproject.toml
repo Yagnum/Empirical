@@ -5,10 +5,13 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.19.1",
     "clerk-backend-api>=7.0.0",
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
+    "psycopg[binary]>=3.3.4",
     "pydantic-settings>=2.15.0",
+    "sqlalchemy>=2",
     "uvicorn[standard]>=0.52.4",
 ]
 
