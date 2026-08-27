@@ -2,12 +2,12 @@
 
 This document explains the technical loop behind a trade. It covers:
 
-- where the data lives, and why there is no database yet
+- where the data lives, and what our own database holds
 - the buy and sell loop, step by step
 - every Alpaca call that we make
 - how FastAPI handles one call
 - how the dashboard stays current
-- when a database becomes necessary
+- the database and the FIFO ledger (ADR-014)
 - how to use Swagger and Postman
 
 ## 1. Where the data lives
@@ -52,7 +52,11 @@ positions, cash, activities"]
 
 Alpaca is a brokerage. A brokerage keeps the ledger. That is its job. If we kept a copy, we would have two ledgers that can disagree. So the dashboard does not "keep track" of anything. On every page load, it asks Alpaca for the current truth.
 
-One exception: FastAPI caches the list of tradable symbols in memory for 15 minutes. The list has about 14,000 rows and changes rarely.
+Two exceptions. FastAPI caches the tradable-symbol list in memory for 15
+minutes. And since ADR-014 we keep our own Postgres for what Alpaca
+forgets: the audit log, idempotency keys, and the FIFO ledger that stores
+realized P/L (see §6). Alpaca remains the source of truth for balances,
+orders, and positions.
 
 ## 2. The buy loop
 
