@@ -5,6 +5,7 @@ import type {
   MarketClock,
   Order,
   PortfolioHistory,
+  Position,
   Quote,
   RealizedPl,
 } from "@/lib/types";
@@ -96,6 +97,13 @@ export const fetchOrders = (
   signal?: AbortSignal,
 ) => get<Order[]>("orders", { status, limit: 50 }, signal);
 
+/*
+  Polled only while a reset is liquidating: an empty list is the signal that
+  the account is flat and the cash return can be asked for.
+*/
+export const fetchPositions = (signal?: AbortSignal) =>
+  get<Position[]>("positions", {}, signal);
+
 export const fetchPortfolioHistory = (
   period: string,
   timeframe: string,
@@ -144,6 +152,7 @@ export const keys = {
     ["bars", symbol, timeframe, limit] as const,
   assets: (q: string) => ["assets", q] as const,
   orders: (status: string) => ["orders", status] as const,
+  positions: ["positions"] as const,
   portfolio: (period: string, timeframe: string) =>
     ["portfolio", period, timeframe] as const,
   activities: (after: string, until: string) =>
@@ -161,6 +170,8 @@ export const QUOTE_INTERVAL_OPEN = 5_000;
 export const QUOTE_INTERVAL_CLOSED = 30_000;
 export const ORDERS_INTERVAL = 10_000;
 export const CLOCK_INTERVAL = 60_000;
+/** While a reset is liquidating: how often to ask whether the account is flat. */
+export const RESET_POLL_INTERVAL = 10_000;
 
 /** The message a person should see for a failed client fetch. */
 export function describeProxyError(error: unknown): string {

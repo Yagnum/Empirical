@@ -7,6 +7,7 @@ import {
   cancelOrder,
   fundAccount,
   placeOrder,
+  resetAccount,
   type ApiFailure,
   type Order,
 } from "@/lib/api";
@@ -79,6 +80,72 @@ export async function depositFunds(
     transferId: result.data.transfer_id,
     settled: brokerStatus === "executed" || brokerStatus === "complete",
   };
+}
+
+/* ---------------------------------------------------------------- reset -- */
+
+export type ResetState =
+  | { status: "idle" }
+  | { status: "error"; message: string }
+  /**
+   * 503 from the API — the reset machinery has no backend right now. Like the
+   * ledger's 503, this is "step aside quietly", not a fault to alarm about.
+   */
+  | { status: "unavailable" }
+  /** Closing orders are in. Can persist for days while the market is closed. */
+  | { status: "liquidating"; positions: number; openOrders: number }
+  /** Flat and journalled back. `returned` stays a decimal string — no floats. */
+  | { status: "reset"; returned: string };
+
+/**
+ * Advances the account reset one step (ADR-015). Each call sells/cancels what
+ * it can or returns the cash once flat; the component re-calls this to poll.
+ * Idempotent, so re-invoking after a day away picks up where it left off.
+ */
+export async function resetBalance(
+  _previous: ResetState,
+  _formData: FormData,
+): Promise<ResetState> {
+  // A reset takes no input: both parameters exist only to satisfy the
+  // useActionState contract, so consume them for the unused-vars rule.
+  void _previous;
+  void _formData;
+
+  const { userId } = await auth();
+  if (!userId) {
+    return { status: "error", message: "Your session expired. Sign in again." };
+  }
+
+  const result = await resetAccount();
+
+  if (!result.ok) {
+    if (result.failure === "unavailable") {
+      return { status: "unavailable" };
+    }
+    // 409 means the broker has not activated the account yet — same window,
+    // and same wording, as a deposit attempted right after onboarding.
+    const message =
+      result.failure === "conflict"
+        ? "Your brokerage account is still being activated. This usually takes under a minute. Try again shortly."
+        : describe(result.failure);
+    return { status: "error", message };
+  }
+
+  // Either step changes what these screens should show: positions emptying,
+  // orders canceling, cash leaving.
+  revalidatePath("/dashboard");
+  revalidatePath("/orders");
+  revalidatePath("/history");
+
+  if (result.data.state === "liquidating") {
+    return {
+      status: "liquidating",
+      positions: result.data.positions,
+      openOrders: result.data.open_orders,
+    };
+  }
+
+  return { status: "reset", returned: result.data.returned };
 }
 
 /* --------------------------------------------------------------- orders -- */

@@ -37,6 +37,19 @@ export type Transfer = {
   amount: string | number;
 };
 
+/**
+ * One step of an account reset (POST /accounts/reset, ADR-015).
+ *
+ * The endpoint advances the flow as far as it can and reports where things
+ * stand; the client polls by calling again. "liquidating" can persist for
+ * days when the market is closed — the closing orders queue until the next
+ * open. `returned` is a decimal string like every other money field, and is
+ * "0" when there was nothing to return (the call is idempotent).
+ */
+export type AccountReset =
+  | { state: "liquidating"; positions: number; open_orders: number }
+  | { state: "reset"; returned: string };
+
 export type MarketClock = {
   is_open: boolean;
   next_open: string;

@@ -12,6 +12,7 @@ import { Panel, PanelHead } from "@/components/panel";
 import { PortfolioChart } from "@/components/portfolio-chart";
 import { PositionsTable } from "@/components/positions-table";
 import { RealizedFigure } from "@/components/realized-figure";
+import { ResetBalance } from "@/components/reset-balance";
 import { LedgerEmpty } from "@/components/ledger";
 import { LedgerSkeleton } from "@/components/states";
 import { activityChipClass, activityLabel } from "@/lib/activity";
@@ -223,24 +224,30 @@ function AccountSummary({
         </div>
       </div>
 
-      <dl className="flex flex-wrap gap-x-8 gap-y-2 border-t border-rule-soft px-6 py-4 text-[12px] sm:px-8">
-        <div className="flex gap-2">
-          <dt className="text-ink-faint">Account</dt>
-          <dd className="figure-nums tracking-[0.04em] text-ink-soft">
-            {account.alpaca_account_id}
-          </dd>
-        </div>
-        <div className="flex gap-2">
-          <dt className="text-ink-faint">Status</dt>
-          <dd className="text-ink-soft">{account.status}</dd>
-        </div>
-        <div className="flex gap-2">
-          <dt className="text-ink-faint">Equity</dt>
-          <dd className="figure-nums text-ink-soft">
-            {formatUsd(account.equity)}
-          </dd>
-        </div>
-      </dl>
+      {/* The statement's fine print carries the one deliberate action that
+          undoes everything above it. ResetBalance draws the footer strip and
+          unfolds its confirm step below it; the identity row stays server-
+          rendered and is passed through. */}
+      <ResetBalance>
+        <dl className="flex flex-wrap gap-x-8 gap-y-2 text-[12px]">
+          <div className="flex gap-2">
+            <dt className="text-ink-faint">Account</dt>
+            <dd className="figure-nums tracking-[0.04em] text-ink-soft">
+              {account.alpaca_account_id}
+            </dd>
+          </div>
+          <div className="flex gap-2">
+            <dt className="text-ink-faint">Status</dt>
+            <dd className="text-ink-soft">{account.status}</dd>
+          </div>
+          <div className="flex gap-2">
+            <dt className="text-ink-faint">Equity</dt>
+            <dd className="figure-nums text-ink-soft">
+              {formatUsd(account.equity)}
+            </dd>
+          </div>
+        </dl>
+      </ResetBalance>
     </Panel>
   );
 }

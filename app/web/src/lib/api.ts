@@ -28,6 +28,7 @@ export type * from "@/lib/types";
 import type { ApiFailure, ApiResult } from "@/lib/types";
 import type {
   Account,
+  AccountReset,
   Activity,
   Asset,
   Bar,
@@ -168,6 +169,15 @@ export function getAccount(): Promise<ApiResult<Account>> {
 /** Simulated deposit. `amount` is a plain number per the API contract. */
 export function fundAccount(amount: number): Promise<ApiResult<Transfer>> {
   return request<Transfer>("/funding", { method: "POST", body: { amount } });
+}
+
+/**
+ * Advances an account reset one step (ADR-015): submits closing orders and
+ * cancels for whatever is still held, or journals the cash back once flat.
+ * Idempotent — calling it again continues, or re-reports, the same reset.
+ */
+export function resetAccount(): Promise<ApiResult<AccountReset>> {
+  return request<AccountReset>("/accounts/reset", { method: "POST" });
 }
 
 /* -------------------------------------------------------------- market --- */
