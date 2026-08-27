@@ -51,7 +51,11 @@ export default async function TradePage() {
         <section className="mt-10">
           <Panel>
             <PanelHead title="What you hold" />
-            <ul className="grid sm:grid-cols-2 lg:grid-cols-3">
+            {/* Full-width rows, the Statements panel's idiom. A grid of cards
+                right-aligned the figure against invisible column edges, which
+                read as floating; a row's figure aligns to the panel's real
+                edge, which reads as belonging. */}
+            <ul>
               {held.map((position) => (
                 <li
                   key={position.symbol}
@@ -59,24 +63,20 @@ export default async function TradePage() {
                 >
                   <Link
                     href={`/trade/${position.symbol}`}
-                    className="block px-6 py-4 transition-colors hover:bg-paper"
+                    className="flex items-baseline justify-between gap-6 px-6 py-4 transition-colors hover:bg-paper"
                   >
-                    {/* Top line: what you scan for — the name and how it is
-                        doing. Everything else is detail, so it drops to one
-                        quiet labelled sentence rather than a stack of bare
-                        numbers. */}
-                    <span className="flex items-baseline justify-between gap-4">
+                    <span>
                       <span className="font-display text-[15px] font-semibold text-ink">
                         {position.symbol}
                       </span>
-                      <Delta amount={toNumber(position.unrealized_pl)} />
+                      <span className="figure-nums mt-1 block text-[13px] leading-relaxed text-ink-faint">
+                        {formatQty(position.qty)}{" "}
+                        {Number(position.qty) === 1 ? "share" : "shares"} · now{" "}
+                        {formatPrice(position.current_price)} · bought{" "}
+                        {formatPrice(position.avg_entry_price)}
+                      </span>
                     </span>
-                    <span className="figure-nums mt-1 block text-[12px] leading-relaxed text-ink-faint">
-                      {formatQty(position.qty)}{" "}
-                      {Number(position.qty) === 1 ? "share" : "shares"} · now{" "}
-                      {formatPrice(position.current_price)} · bought{" "}
-                      {formatPrice(position.avg_entry_price)}
-                    </span>
+                    <Delta amount={toNumber(position.unrealized_pl)} size="md" />
                   </Link>
                 </li>
               ))}
