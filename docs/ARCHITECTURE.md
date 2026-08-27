@@ -119,8 +119,15 @@ Same auth rule. Full request and response schemas live in Swagger at
 | `GET /activities` · `GET /activities/export.csv` | Transaction history and CSV statement |
 | `GET /documents` · `GET /documents/{id}/download` | Alpaca-issued documents |
 
+ADR-014 additions: `GET /pnl/realized` (FIFO realized profit), a
+`realized_pl` field on activity rows and the CSV, an optional
+`Idempotency-Key` header on `POST /orders`, and an `X-Request-ID` header on
+every response (join key to the `audit_log` table).
+
 Developer tools: `scripts/dev_token.py` mints a one-hour Clerk token for
 Swagger and Postman. `scripts/make_postman.py` regenerates the collection.
+Database: Neon Postgres (`development` branch for local work), migrations
+via `uv run alembic upgrade head` in `app/api`.
 
 ## Phases
 

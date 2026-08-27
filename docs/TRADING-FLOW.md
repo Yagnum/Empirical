@@ -168,9 +168,21 @@ The dashboard is a **read model**. It asks and displays. It stores nothing.
 - **Intervals**: quotes every 5 seconds while the market is open, 30 seconds when closed. Orders every 10 seconds while an order works.
 - **After an action**: the server action calls `revalidatePath` so the next visit re-renders with fresh data.
 
-## 6. When a database becomes necessary
+## 6. The database (added 2026-08-27, ADR-014)
 
-Not yet. Today a database would hold copies of Alpaca's data, and copies drift. It becomes necessary when we must store something that Alpaca does not know:
+The database now exists: Neon Postgres, SQLAlchemy 2, Alembic migrations.
+It holds only what Alpaca forgets — never a copy of what Alpaca remembers:
+
+- `audit_log` — one row per state-changing request (who, what, outcome,
+  request id). The `X-Request-ID` response header is the join key.
+- `order_intents` — idempotency keys, so a retried submit cannot place two
+  orders.
+- `fills`, `lots`, `realized_pnl` — the FIFO ledger. Buys open lots, sells
+  consume them oldest-first, and each sell's profit is stored forever.
+  `GET /pnl/realized` reports it. This ledger is the seed of the ERR-era
+  double-entry book.
+
+The original reasoning, kept for the record: a database was deferred Today a database would hold copies of Alpaca's data, and copies drift. It becomes necessary when we must store something that Alpaca does not know:
 
 | Need | Phase | Why Alpaca cannot hold it |
 | --- | --- | --- |
