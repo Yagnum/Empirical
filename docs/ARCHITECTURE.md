@@ -127,6 +127,14 @@ every response (join key to the `audit_log` table). Later joined by
 prospective sell, so the order ticket can estimate the gain before the
 trade with the same method History records after it.
 
+ADR-016 addition: `GET /market/token/{symbol}` — the xStock that mirrors a
+listed share, priced live on Jupiter beside Alpaca's last trade, with the
+signed gap between them. 404 `no_token` for symbols without one. Read-only:
+Yagnum never trades the token. The sampler (`scripts/sample_prices.py`, a
+GitHub Actions cron) records the same pair every five minutes into
+`token_prices`; `scripts/backfill_history.py` fills `token_candles` and
+`market_bars` from GeckoTerminal and Alpaca for the research notebook.
+
 ADR-015 additions: `POST /accounts/reset` (sell everything, return the
 cash to the firm sweep, land at $0 — each call reports `liquidating` or
 `reset` and the client polls by re-calling) and `POST /webhooks/clerk`

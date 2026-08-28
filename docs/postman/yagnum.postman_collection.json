@@ -81,6 +81,25 @@
             "description": "Idempotent: one Alpaca account per Clerk user, created on first call.\n\nAudited (ADR-014): this is the one request that brings a brokerage account\ninto existence, so \"who opened this account, and when\" is worth a row."
           },
           "response": []
+        },
+        {
+          "name": "POST /accounts/reset",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/accounts/reset",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "reset"
+              ]
+            },
+            "description": "Sell everything, return the cash, leave the account at $0 (ADR-015).\n\nThe owner's chosen semantics: a reset liquidates whatever the user still\nholds, then journals every dollar back to the firm sweep \u2014 the account\nlands empty and the existing funding form picks the next starting\namount. Shares its flatten-and-return steps with the offboarding webhook\n(`offboarding.py`); unlike the webhook it never retires the email or\ncloses the account.\n\nEach call advances the flow as far as it can and reports where things\nstand; the frontend polls by re-POSTing. The states:\n\n  {\"state\": \"liquidating\", \"positions\": N, \"open_orders\": M}\n      Closing orders submitted (cancelling open orders with them). With\n      the market closed those sells queue until the next open, so this\n      state can honestly persist for days \u2014 that is the market, not a\n      bug, and the UI should say so.\n  {\"state\": \"reset\", \"returned\": \"<decimal string>\"}\n      Flat, orders cancelled, cash journalled away. `\"0\"` when there\n      was nothing to return \u2014 calling reset twice is harmless.\n\nAudited (ADR-014): a reset moves money and destroys positions."
+          },
+          "response": []
         }
       ]
     },
@@ -227,6 +246,26 @@
               ]
             },
             "description": "Latest bid/ask plus the last trade, in one call.\n\nAlpaca splits these across two endpoints because they are two different\nfacts: the quote is what someone will trade at *now*, the trade is what\nsomeone actually paid. A buy preview needs both.\n\nOutside market hours the ask side is often 0 - there is nobody offering."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /market/token/{symbol}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/market/token/{{symbol}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "market",
+                "token",
+                "{{symbol}}"
+              ]
+            },
+            "description": "The tokenized twin of a listed share, priced right now on Jupiter.\n\nAn xStock (NVDAx for NVDA) is one real share held in custody, mirrored as\na Solana token that trades around the clock. While the market is open the\ntwo prices track closely; on a weekend the token is the only live price\nthere is, and the distance between them at Monday's first execution is\nwhat the paper's reserve is sized against. This route shows that distance\nlive, as `gap_pct`, beside both prices.\n\n404 `no_token` when no xStock mirrors this symbol (most stocks). The\nAlpaca side is best-effort - the token price is the point of the call, so\na slow broker feed leaves `market_*` null rather than failing it."
           },
           "response": []
         }
@@ -519,6 +558,39 @@
       "name": "7 - Realized P/L",
       "item": [
         {
+          "name": "GET /pnl/preview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/pnl/preview?symbol={{symbol}}&qty=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pnl",
+                "preview"
+              ],
+              "query": [
+                {
+                  "key": "symbol",
+                  "value": "{{symbol}}",
+                  "description": "e.g. NVDA",
+                  "disabled": false
+                },
+                {
+                  "key": "qty",
+                  "value": "",
+                  "description": "shares to sell",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "The FIFO cost basis a sell of `qty` shares would match against, today.\n\nThis is what lets the order ticket say \"you bought these shares at X\"\n*before* the trade, using the same lot walk that will record the realized\nfigure after the fill \u2014 so the preview and the history can never quote\ntwo different methods. Read-only: nothing is matched, nothing is written.\n\nThe gain itself is not computed here, deliberately. The ticket multiplies\nagainst a quote that changes every few seconds; shipping the cost basis\nonce and letting the display do the last subtraction beats re-asking the\nledger on every tick. `cost_basis` is null when no open lot covers the\nsale (history gap, or selling more than held) \u2014 display \"unknown\", never\nzero."
+          },
+          "response": []
+        },
+        {
           "name": "GET /pnl/realized",
           "request": {
             "method": "GET",
@@ -548,6 +620,30 @@
               ]
             },
             "description": "Realized P/L over a date range: the total and a per-symbol breakdown.\n\n`trades` counts **sell fills**, not round trips: one sell that consumed\nthree lots is one trade here, because that is the event the user performed\nand the row we stored.\n\nAn account that has never sold anything gets `{\"total\": \"0.00\",\n\"by_symbol\": [], \"method\": \"FIFO\"}` - not a 404. \"Nothing realized yet\" is\na perfectly good answer."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "webhooks",
+      "item": [
+        {
+          "name": "POST /webhooks/clerk",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/webhooks/clerk",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "clerk"
+              ]
+            },
+            "description": "Verify the Svix signature, then act on `user.deleted`.\n\n`async` only to read the raw body (the exact bytes are what is signed);\nthe blocking work then runs in a worker thread via `run_in_threadpool`,\nsame as every `def` route in this codebase."
           },
           "response": []
         }
