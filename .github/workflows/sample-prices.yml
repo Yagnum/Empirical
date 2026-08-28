@@ -7,14 +7,17 @@
 #   ALPACA_BROKER_SECRET
 #   JUP_API_KEY            optional; without it the free lite host is used
 #
-# GitHub schedules are best-effort: a run can start a few minutes late, and
+# Minutes 3,8,13,... rather than 0,5,10,...: GitHub deprioritises the crowded
+# top-of-the-hour and multiple-of-five minutes, and a new schedule starved
+# there for over an hour on 2026-08-28. Schedules are best-effort: a run can
+# start a few minutes late, and
 # the platform pauses schedules on repositories with no activity for 60
 # days. Any push resets that clock.
 name: Sample xStock prices
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "3-58/5 * * * *"
   workflow_dispatch:
 
 concurrency:
