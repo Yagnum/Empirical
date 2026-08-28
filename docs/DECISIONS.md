@@ -435,3 +435,44 @@ worth more every weekend it survives. GitHub's schedule is best-effort
 in-hours observation, 2026-08-28 12:58 PM ET: NVDA $219.955 on Alpaca,
 NVDAx $220.24 on Jupiter — a 0.13% gap. The token tracks the share
 tightly in hours; the risk lives off-hours, which is what we now record.
+
+---
+
+## ADR-017 — The ERR is a pass-through, and the Monday leg closes premarket
+
+**Date**: 2026-08-28 · **Status**: Accepted
+
+**Context**: Working the paper's reconciliation with real numbers
+(docs/YAGNUM-EXPLAINED.md §3e) showed what the formulas imply but never
+state: surplus refunded, shortfall taken from escrow, so **the weekend
+trader always ends at the first regulated-market price**. A Saturday sale
+at $226 that settles Monday at $223 nets the trader $223 a share. The
+trader gains immediacy and guaranteed settlement into regulated custody,
+not a locked price. The alternative — Yagnum quoting a firm weekend price
+and bearing the gap for a fee — is a market-making business exposed to
+informed weekend flow it cannot hedge, because the hedging market is
+closed. The paper also fixed settlement at the 9:30 open, the most
+volatile moment of the session.
+
+**Decision**:
+- **Version A, said out loud.** Yagnum is a neutral bridge. Weekend
+  execution is provisional; final settlement is the first regulated
+  execution. The paper's language must stop implying that weekend prices
+  are locked. Yagnum ends flat on every trade by design.
+- **The escrow is collateral, not a liability cap** (proposed amendment
+  to §6c for the paper). A shortfall beyond the escrow is debited from
+  the trader's brokerage account, as any broker treats margin. Cascade
+  Levels 2–4 exist for a customer who cannot pay, not as a free downside
+  cap. `σ_gap · z_α` then answers "how much collateral makes debits rare".
+- **Close the Monday leg premarket, as early as liquid.** Alpaca accepts
+  extended-hours limit orders from 4:00 AM ET (limit only, `extended_hours`
+  set, day time-in-force). Unfilled premarket orders roll into the 9:30
+  auction. "Liquid enough" is an empirical threshold: the notebook
+  measures the gap from the weekend token price to each Monday moment
+  (premarket hours, the auction, minutes after) and to the spread at that
+  moment, using the sampler's own five-minute record.
+
+**Consequences**: The paper needs a wording pass (abstract, §1, §6) and
+one mechanism amendment (§6c). The notebook gains a second question
+beside `σ_gap`: the settlement moment. The engine, when built, places
+premarket limit orders first and never a market order in extended hours.
