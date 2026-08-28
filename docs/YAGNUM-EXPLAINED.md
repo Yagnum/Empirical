@@ -5,7 +5,7 @@ Source of truth: the academic proposal (v4, August 2026). This document restates
 
 Reading time: about 15 minutes.
 
-**Running example used throughout.** NVDA is the Nvidia share. NVDAx is the token that represents one NVDA share on Solana. On Saturday, NVDAx trades on Jupiter at **$226**. On Monday at 9:30 AM ET, NVDA opens on NASDAQ at **$223**. The trade size is **10 shares**.
+**Running example used throughout.** NVDA is the Nvidia share. NVDAx is the token that represents one NVDA share on Solana. On Saturday, NVDAx trades on Jupiter at **$226**. On Monday, the first liquid regulated execution of NVDA fills at **$223**. The trade size is **10 shares**.
 
 ---
 
@@ -47,7 +47,7 @@ A **hedge** is a second trade that offsets the risk of a first trade. If you own
 
 ### 3b. Why Yagnum takes the opposite side
 
-Every trade needs two sides. When the trader sells 10 NVDAx on Saturday, somebody must buy them. That somebody is the **counterparty**. Nobody can settle the real share on Saturday. So Yagnum steps in as the counterparty. It buys the 10 NVDAx at $226 at the same moment the trader sells. Yagnum now holds the exposure: it owns tokens whose value follows NVDA, and NVDA cannot be sold until Monday. On Monday at 9:30 AM, Yagnum sells 10 NVDA through the broker. That Monday sale closes the exposure. Both legs are now done. The hedge is complete.
+Every trade needs two sides. When the trader sells 10 NVDAx on Saturday, somebody must buy them. That somebody is the **counterparty**. Nobody can settle the real share on Saturday. So Yagnum steps in as the counterparty. It buys the 10 NVDAx at $226 at the same moment the trader sells. Yagnum now holds the exposure: it owns tokens whose value follows NVDA, and NVDA cannot be sold until Monday. On Monday, Yagnum sells 10 NVDA through the broker at the first liquid regulated execution: premarket when liquid enough, otherwise the 9:30 auction. (**Premarket** is the early session, from 4:00 AM ET, where limit orders can trade before the main market opens.) That Monday sale closes the exposure. Both legs are now done. The hedge is complete.
 
 The buy direction is the mirror image. The trader buys 10 NVDAx on Saturday. Yagnum sells 10 NVDAx to the trader. Yagnum is now short: it is exposed to NVDA going up. On Monday, Yagnum buys 10 NVDA through the broker to close the exposure.
 
@@ -59,7 +59,7 @@ flowchart LR
     A["Saturday: trader sells 10 NVDAx on Jupiter"] -->|"P_JUP = $226 (known now)"| B["Yagnum buys 10 NVDAx (contra side)"]
     B --> C["ERR escrow locked (about $105)"]
     C --> D["Weekend: market closed, Yagnum holds the exposure"]
-    D -->|"Monday 9:30 AM ET"| E["Yagnum sells 10 NVDA at the broker"]
+    D -->|"Monday: first liquid execution"| E["Yagnum sells 10 NVDA at the broker"]
     E -->|"P_MKT = $223 (known Monday)"| F["Reconcile: ERR_final = ERR_initial + P&L_net"]
     F --> G["Surplus refunded or shortfall cascaded"]
     style A fill:#173a63,stroke:#5b9cf5,color:#dbe9ff
@@ -89,7 +89,7 @@ One way to say it in one sentence: **the ERR makes the trader's true price equal
 
 Assumptions for all cases: Q = 10 shares. Fees_est = $2. Fees_actual = $2. ERR_initial = $105.14 + $2 = **$107.14** (Section 4e shows how). All prices are per share.
 
-**Case 1. Trader SELLS on Saturday at $226. Monday opens at $223.**
+**Case 1. Trader SELLS on Saturday at $226. Monday's fill is $223.**
 
 - Trader's view: receives 10 × $226 = $2,260 on Saturday. Locks $107.14 in the ERR.
 - Yagnum's view: buys 10 NVDAx at $226 (cost $2,260). Sells 10 NVDA on Monday at $223 (receives $2,230). Gross loss: **−$30**. After $2 fees: **−$32**.
@@ -97,29 +97,35 @@ Assumptions for all cases: Q = 10 shares. Fees_est = $2. Fees_actual = $2. ERR_i
 - Trader's net: $2,260 − $107.14 + $75.14 = $2,228. That is 10 × $223 − $2 fees. The trader's true price is Monday's $223.
 - Who lost the $30? In net terms, the trader's escrow paid it. Yagnum is flat.
 
-**Case 2. Trader SELLS on Saturday at $226. Monday opens at $229.**
+**Case 2. Trader SELLS on Saturday at $226. Monday's fill is $229.**
 
 - Yagnum's view: buys at $226, sells at $229. Gross gain: **+$30**. Net: **+$28**.
 - ERR_final = $107.14 + $28 = **$135.14**. All of it is refunded to the trader.
 - Trader's net: $2,260 − $107.14 + $135.14 = $2,288 = 10 × $229 − $2. Again, the trader's true price is Monday's price.
 
-**Case 3. Trader BUYS on Saturday at $226. Monday opens at $223.**
+**Case 3. Trader BUYS on Saturday at $226. Monday's fill is $223.**
 
 - Trader's view: pays $2,260 for 10 NVDAx. Locks $107.14 in the ERR.
 - Yagnum's view: sells 10 NVDAx at $226 (receives $2,260). Buys 10 NVDA on Monday at $223 (pays $2,230). Gross gain: **+$30**. Net: **+$28**.
 - ERR_final = $107.14 + $28 = **$135.14**, refunded. Trader's net cost: $2,260 + $107.14 − $135.14 = $2,232 = 10 × $223 + $2.
 
-**Case 4. Trader BUYS on Saturday at $226. Monday opens at $229.**
+**Case 4. Trader BUYS on Saturday at $226. Monday's fill is $229.**
 
 - Yagnum's view: sells at $226, buys back at $229. Gross loss: **−$30**. Net: **−$32**.
 - ERR_final = $107.14 − $32 = **$75.14**, refunded. Trader's net cost: $2,260 + $107.14 − $75.14 = $2,292 = 10 × $229 + $2.
 
-**Case 5. A bad weekend. Trader SELLS at $226. Monday opens at $214.**
+**Case 5. A bad weekend. Trader SELLS at $226. Monday's fill is $214.**
 
 - Gross loss: (214 − 226) × 10 = **−$120**. Net: **−$122**.
-- ERR_final = $107.14 − $122 = **−$14.86**. The escrow was not enough. The shortfall cascade (Section 4f) handles the missing $14.86.
+- ERR_final = $107.14 − $122 = **−$14.86**. The escrow was not enough. Under the ADR-017 amendment (Section 4f), the missing $14.86 is debited from Alice's brokerage account. The shortfall cascade applies only if she cannot pay.
 
 Note the pattern. In every case, the trader ends at Monday's price plus or minus fees. Yagnum ends at zero. The ERR is the pipe that moves the gap from one to the other.
+
+### 3f. What Alice actually gets
+
+This is the plain statement of the design, recorded as ADR-017. Under the reconciliation, the weekend trader's final price is **always the first regulated-market price**. The weekend execution is **provisional**: it is a placeholder until the real share trades. What Alice gains is **immediacy** and **guaranteed settlement**. She gets her cash (or her tokens) on Saturday, and her trade is guaranteed to settle into regulated custody. What she does **not** get is a locked weekend price. And she does **not** hand Monday's risk to Yagnum. If NVDA falls over the weekend, Alice's sale nets the lower Monday price. Yagnum is a neutral bridge. It ends flat on every trade by design.
+
+Why not the alternative? Yagnum could quote Alice a firm $226 on Saturday, charge a fee, and carry the gap itself. That was rejected. **Adverse selection** means the people most eager to trade with you are the ones who know something you do not. On a weekend, that is exactly who trades: people reacting to weekend news. Their flow pushes the gap systematically against the party quoting the firm price. And that party cannot protect itself, because the market it would hedge in is closed. This is the classic market-maker adverse-selection problem. A fee cannot fix it, because the informed traders would pay the fee only when it is worth it to them. So Yagnum does not quote prices. It passes the real price through.
 
 ---
 
@@ -237,6 +243,11 @@ flowchart TD
 
 The point of the cascade: no single actor bears unlimited exposure, and every trade ends in a known state.
 
+> **Proposed amendment (ADR-017): the escrow is collateral, not a cap.**
+> **Margin** is money a customer posts with a broker as security, and the broker debits the customer's account if a loss exceeds it. The ERR should work the same way. A shortfall beyond the escrow is debited from the trader's brokerage account. Levels 2 to 4 apply only when the customer cannot pay.
+>
+> Why this matters: without the amendment, the trader's loss is capped at the escrow, while the trader's upside is unlimited. That is a free downside cap, paid for by Yagnum's reserves. In Case 5 above, the trader would keep the $14.86 that Yagnum's reserve absorbed. With the amendment, σ_gap × z_α answers a cleaner question: "how much collateral makes debits rare?"
+
 ---
 
 ## 5. The four invariants
@@ -258,7 +269,7 @@ From proposal Section 7. Each is one line.
 
 | Failure | What Yagnum does |
 | --- | --- |
-| Broker does not fill at open | Escrow period extends. Retry with increasing wait times. If unfilled by T+1 close, escalate to cascade Levels 3 and 4. |
+| Broker does not fill in the first session | Escrow period extends. Retry with increasing wait times. If unfilled by T+1 close, escalate to cascade Levels 3 and 4. |
 | Broker partial fill (Q_filled < Q) | Reconcile the filled part pro-rata. The rest re-enters the next cycle or is reversed. |
 | Trading halt on the ticker | Escrow period extends until the halt lifts. The Invariant 3 deadline pauses. |
 | Full exchange outage | All affected trades enter a suspended state. No broker orders are attempted. |
@@ -278,7 +289,9 @@ The proposal is a framework. Several parts are not yet measured. The biggest ope
 - **Too big or too small both cost something.** A reserve that is too big ties up trader cash for no reason. A reserve that is too small causes frequent shortfalls and cascade escalation.
 - **How well P_JUP tracks the real share off-hours** is an empirical question (proposal Research Question 5). The tracking error distribution feeds directly into σ_gap.
 
-The planned notebook `notebooks/gap-volatility.ipynb` will measure this. It will compare recorded xStock prices against the real share's next open and produce the actual gap distribution. Until that notebook exists, every ERR number in this document is illustrative.
+- **Which Monday moment is the settlement moment.** Alpaca accepts extended-hours limit orders from 4:00 AM ET (limit only, never market orders). The notebook will measure, from the sampler's own 5-minute record, which Monday moment sits closest to the weekend token price with the tightest spread, and that moment defines "liquid enough".
+
+The planned notebook `notebooks/gap-volatility.ipynb` will measure this. It will compare recorded xStock prices against the real share's first liquid Monday execution and produce the actual gap distribution. Until that notebook exists, every ERR number in this document is illustrative.
 
 ---
 
@@ -292,6 +305,7 @@ What already exists and where it leads:
 - **Money as strings, never floats** (ADR-010). Reconciliation must balance to the cent. This rule was adopted early so it is a habit before the ERR arrives.
 - **Order idempotency and an audit log** (ADR-014). A retried order does not place twice. Every state change is recorded. Both are prerequisites for Invariant 3.
 - **ADR-016 (in progress).** Starts recording the xStock price on Jupiter every 5 minutes, beside the real share price from Alpaca. This is the raw data for σ_gap. Without it, Section 7 cannot be answered.
+- **ADR-017 (accepted 2026-08-28).** Records the three decisions this document now reflects: the trader always ends at the first regulated price (Section 3f), the escrow is collateral and not a cap (Section 4f), and the Monday leg closes premarket when liquid enough (Section 7). The engine, when built, places premarket limit orders first and never a market order in extended hours.
 
 One live data point already recorded. On 2026-08-28 at 12:58 PM ET, with the market open, NVDA traded at **$219.955** on Alpaca while NVDAx traded at **$220.24** on Jupiter. The gap is $0.285, or **0.13%**. During market hours, the token tracks the share tightly. Arbitrage keeps them close, because anyone can buy the cheap one and sell the expensive one. The risk lives off-hours, when that arbitrage is impossible. That is exactly the window the ERR is built for.
 
@@ -301,6 +315,7 @@ One live data point already recorded. On 2026-08-28 at 12:58 PM ET, with the mar
 
 | Term | Meaning |
 | --- | --- |
+| **Adverse selection** | The people most eager to trade with you are the ones who know something you do not. |
 | **AMM** | Automated market maker. A pool of tokens that sets prices by formula instead of by matching buyers and sellers. |
 | **Ask** | The lowest price a seller will accept right now. A buy order fills here. |
 | **Bid** | The highest price a buyer will pay right now. A sell order fills here. |
@@ -315,8 +330,10 @@ One live data point already recorded. On 2026-08-28 at 12:58 PM ET, with the mar
 | **Hedge** | A second trade that offsets the risk of a first trade. |
 | **Jupiter** | A trade router on Solana that finds the best price across many liquidity pools. |
 | **Liquidity** | The supply of buyers and sellers ready to trade now. High liquidity means you can trade without moving the price much. |
+| **Margin** | Money a customer posts with a broker as security. Losses beyond it are debited from the customer's account. |
 | **Mint** | To create new tokens. Yagnum never mints. Backed Finance does. |
 | **P_JUP / P_MKT** | The Jupiter token price at the weekend trade / the broker's real fill price on Monday. |
+| **Premarket** | The early trading session from 4:00 AM ET, before the 9:30 AM open. Limit orders only. |
 | **Reconcile** | To compare two records or prices and settle the difference so the books balance. |
 | **Settlement** | The moment the real share and the real dollars finally change hands. |
 | **Sigma (σ_gap)** | Gap volatility. The typical percentage move between P_JUP and P_MKT over a closed period. |
