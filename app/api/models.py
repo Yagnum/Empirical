@@ -27,6 +27,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -226,3 +227,42 @@ class RealizedPnl(Base):
     # which one produced it.
     method: Mapped[str] = mapped_column(String(16), nullable=False, default="FIFO")
     occurred_at: Mapped[dt.datetime] = mapped_column(TZ, nullable=False)
+
+
+class TokenPrice(Base):
+    """One observation: a tokenized stock's Jupiter price beside its real share.
+
+    The raw material for the paper's central number, sigma_gap (ADR-016).
+    Sampled every five minutes around the clock, so the weekend - when the
+    share cannot trade but the token can - is recorded at the same cadence as
+    the trading day. `market_*` is Alpaca's last trade for the underlying at
+    the same moment; it goes stale across a weekend on purpose, because that
+    staleness *is* the gap being measured.
+
+    Append-only. Nothing ever updates or deletes an observation.
+    """
+
+    __tablename__ = "token_prices"
+    __table_args__ = (
+        Index("ix_token_prices_symbol_sampled", "symbol", "sampled_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    # The moment we asked - one value shared by every row of a run.
+    sampled_at: Mapped[dt.datetime] = mapped_column(TZ, nullable=False, index=True)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)  # NVDAx
+    # NVDA. Null for a token with no listed share (SpaceX is private).
+    underlying: Mapped[str | None] = mapped_column(String(16))
+    mint: Mapped[str] = mapped_column(String(64), nullable=False)
+    usd_price: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    liquidity_usd: Mapped[Decimal | None] = mapped_column(MONEY)
+    # Solana block of the last swap behind `usd_price`; a recency check.
+    block_id: Mapped[int | None] = mapped_column(BigInteger)
+    price_change_24h: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    # Alpaca's last trade for the underlying. Null when Alpaca has no such
+    # symbol - SpaceX has a token but no listed share.
+    market_price: Mapped[Decimal | None] = mapped_column(MONEY)
+    market_trade_at: Mapped[dt.datetime | None] = mapped_column(TZ)
+    # Alpaca's clock at sampling time; null if the clock call failed.
+    market_open: Mapped[bool | None] = mapped_column(Boolean)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="jupiter_price_v3")

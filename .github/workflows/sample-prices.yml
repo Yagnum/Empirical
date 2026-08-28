@@ -1,0 +1,42 @@
+# Every five minutes, around the clock: record each xStock's Jupiter price
+# beside its real share (ADR-016). This is the dataset behind sigma_gap.
+#
+# Secrets (repository Settings -> Secrets and variables -> Actions):
+#   DATABASE_URL           Neon pooled URL for the branch that holds token_prices
+#   ALPACA_BROKER_ID       sandbox key (market data only; no orders are placed)
+#   ALPACA_BROKER_SECRET
+#   JUP_API_KEY            optional; without it the free lite host is used
+#
+# GitHub schedules are best-effort: a run can start a few minutes late, and
+# the platform pauses schedules on repositories with no activity for 60
+# days. Any push resets that clock.
+name: Sample xStock prices
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sample-prices
+  cancel-in-progress: false
+
+jobs:
+  sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: app/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --no-dev
+      - run: uv run python scripts/sample_prices.py --write
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ALPACA_BROKER_ID: ${{ secrets.ALPACA_BROKER_ID }}
+          ALPACA_BROKER_SECRET: ${{ secrets.ALPACA_BROKER_SECRET }}
+          JUP_API_KEY: ${{ secrets.JUP_API_KEY }}

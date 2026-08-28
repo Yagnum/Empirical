@@ -643,3 +643,22 @@ def document_download_url(account_id: str, document_id: str) -> str:
     if not location:
         raise AlpacaError("document download returned no location", status_code=502)
     return location
+
+
+# ---------------------------------------------------------------------------
+# Market data, many symbols at once (ADR-016 sampler)
+# ---------------------------------------------------------------------------
+
+
+def latest_trades(symbols) -> dict[str, dict]:
+    """GET /v2/stocks/trades/latest?symbols=A,B,C -> {symbol: trade}.
+
+    One round trip for the whole xStocks list instead of one per underlying.
+    Symbols Alpaca does not know are simply absent from the answer.
+    """
+    wanted = [symbol for symbol in dict.fromkeys(symbols) if symbol]
+    if not wanted:
+        return {}
+    body = _data_request("/v2/stocks/trades/latest", {"symbols": ",".join(wanted)})
+    trades = (body or {}).get("trades") or {}
+    return {symbol: trade for symbol, trade in trades.items() if isinstance(trade, dict)}

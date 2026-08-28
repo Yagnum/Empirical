@@ -394,3 +394,44 @@ webhook cannot be registered until the API has a public URL, so it goes
 live with the Azure deployment; the code and tests land now. A reset
 started on a weekend stays "liquidating" until Monday's open — the UI
 must say so plainly rather than pretend it is instant.
+
+---
+
+## ADR-016 — Measure before building: the xStock price record
+
+**Date**: 2026-08-28 · **Status**: Accepted
+
+**Context**: The paper sizes the Execution Reconciliation Reserve as
+`ERR_initial = Q · P_open · σ_gap · z_α + Fees` (§6d). Everything in that
+formula is known at trade time except `σ_gap` — the historical deviation
+between a token's weekend price on Jupiter and Monday's real fill. Nobody
+publishes that number. Jupiter's Price API is current-price only;
+GeckoTerminal keeps 180 days of hourly candles for free; Alpaca keeps
+years of daily bars for the real share. Owner's decision: research first,
+Jupiter trading later, Azure after the app is done.
+
+**Decision**:
+- **Record our own dataset, starting now.** Every five minutes, around the
+  clock, store each xStock's Jupiter price beside its real share's last
+  trade on Alpaca (`token_prices`, append-only). The weekend is the
+  interesting part, and no free source keeps it at this resolution.
+- **Run the sampler on GitHub Actions cron**, not on a laptop that sleeps
+  and not on infrastructure we have not deployed yet. Secrets live in the
+  repository's Actions secrets; the job places no orders and signs no
+  transactions.
+- **Numbers stay strings until Decimal** (ADR-010): Jupiter's JSON numbers
+  are decoded with `parse_float=str`; the column is `NUMERIC(28,10)`.
+- **Suffix-stripping needs an override list.** `SPCXx` is SpaceX, a
+  private company; `SPCX` on Alpaca is an unrelated ETF. Tokens with no
+  listed share map to a null `underlying`, never to a look-alike ticker.
+- **Backfill the past from GeckoTerminal (180 days, hourly) and Alpaca
+  (2 years, daily)**, then measure `σ_gap` both ways in
+  `notebooks/gap-volatility.ipynb` — the paper's Research Question 1 —
+  before any reserve figure is shown in the app.
+
+**Consequences**: A dataset that grows by about 5,700 rows a day and is
+worth more every weekend it survives. GitHub's schedule is best-effort
+(runs can start late; idle repositories pause after 60 days). The first
+in-hours observation, 2026-08-28 12:58 PM ET: NVDA $219.955 on Alpaca,
+NVDAx $220.24 on Jupiter — a 0.13% gap. The token tracks the share
+tightly in hours; the risk lives off-hours, which is what we now record.
