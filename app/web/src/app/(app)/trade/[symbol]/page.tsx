@@ -10,11 +10,13 @@ import { Panel, PanelHead } from "@/components/panel";
 import { PriceChart } from "@/components/price-chart";
 import { QuotePanel } from "@/components/quote-panel";
 import { SymbolSearch } from "@/components/symbol-search";
+import { TokenPricePanel } from "@/components/token-price-panel";
 import {
   getAccount,
   getBars,
   getClock,
   getQuote,
+  getTokenPrice,
   searchAssets,
 } from "@/lib/api";
 import { priceRange } from "@/lib/chart";
@@ -38,14 +40,15 @@ export default async function SymbolPage({
 
   const day = priceRange("1D");
 
-  // Five independent requests, all started at once. The page is only as slow
+  // Six independent requests, all started at once. The page is only as slow
   // as the slowest of them, not the sum.
-  const [account, quote, bars, clock, assets] = await Promise.all([
+  const [account, quote, bars, clock, assets, token] = await Promise.all([
     getAccount(),
     getQuote(symbol),
     getBars(symbol, day.timeframe, day.limit),
     getClock(),
     searchAssets(symbol, 1),
+    getTokenPrice(symbol),
   ]);
 
   if (!account.ok && account.failure === "no_account") {
@@ -75,6 +78,10 @@ export default async function SymbolPage({
   const asset = assets.ok ? assets.data.find((a) => a.symbol === symbol) : null;
   const initialClock = clock.ok ? clock.data : undefined;
   const initialQuote = quote.ok ? quote.data : undefined;
+  // Most symbols have no xStock (404 "no_token"), and a Jupiter outage (502)
+  // is not worth a panel either: the panel exists only when there is a token
+  // price to show, so pages without one keep exactly their old layout.
+  const initialToken = token.ok ? token.data : undefined;
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8 sm:py-10">
@@ -114,6 +121,24 @@ export default async function SymbolPage({
               initialClock={initialClock}
             />
           </Panel>
+
+          {initialToken ? (
+            <Panel>
+              <PanelHead
+                title="Around the clock"
+                aside={
+                  <span className="text-[12px] text-ink-faint">
+                    {initialToken.token} on Jupiter
+                  </span>
+                }
+              />
+              <TokenPricePanel
+                symbol={symbol}
+                initialToken={initialToken}
+                initialClock={initialClock}
+              />
+            </Panel>
+          ) : null}
 
           <Panel>
             <PriceChart

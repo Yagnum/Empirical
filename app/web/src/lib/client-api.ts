@@ -9,6 +9,7 @@ import type {
   Position,
   Quote,
   RealizedPl,
+  TokenPrice,
 } from "@/lib/types";
 
 /*
@@ -90,6 +91,14 @@ export const fetchBars = (
     signal,
   );
 
+/*
+  The xStock's price on Jupiter, beside the share's last trade on Alpaca. The
+  page only mounts the poll for symbols the server already found a token for,
+  so a 404 "no_token" never reaches this path in practice.
+*/
+export const fetchTokenPrice = (symbol: string, signal?: AbortSignal) =>
+  get<TokenPrice>("market/token/" + encodeURIComponent(symbol), {}, signal);
+
 export const fetchAssets = (q: string, signal?: AbortSignal) =>
   get<Asset[]>("market/assets", { q, limit: 8 }, signal);
 
@@ -162,6 +171,7 @@ export const keys = {
   quote: (symbol: string) => ["quote", symbol] as const,
   bars: (symbol: string, timeframe: string, limit: number) =>
     ["bars", symbol, timeframe, limit] as const,
+  token: (symbol: string) => ["token", symbol] as const,
   assets: (q: string) => ["assets", q] as const,
   orders: (status: string) => ["orders", status] as const,
   positions: ["positions"] as const,
@@ -183,6 +193,13 @@ export const keys = {
 export const QUOTE_INTERVAL_OPEN = 5_000;
 export const QUOTE_INTERVAL_CLOSED = 30_000;
 export const ORDERS_INTERVAL = 10_000;
+/*
+  The token price is a reference figure, not something anyone trades on here,
+  and the sampler behind ADR-016 records it every five minutes. Thirty seconds
+  in hours keeps it honest beside the quote; a minute off-hours is plenty.
+*/
+export const TOKEN_INTERVAL_OPEN = 30_000;
+export const TOKEN_INTERVAL_CLOSED = 60_000;
 export const CLOCK_INTERVAL = 60_000;
 /** While a reset is liquidating: how often to ask whether the account is flat. */
 export const RESET_POLL_INTERVAL = 10_000;

@@ -6,11 +6,14 @@ import {
   CLOCK_INTERVAL,
   QUOTE_INTERVAL_CLOSED,
   QUOTE_INTERVAL_OPEN,
+  TOKEN_INTERVAL_CLOSED,
+  TOKEN_INTERVAL_OPEN,
   fetchClock,
   fetchQuote,
+  fetchTokenPrice,
   keys,
 } from "@/lib/client-api";
-import type { MarketClock, Quote } from "@/lib/types";
+import type { MarketClock, Quote, TokenPrice } from "@/lib/types";
 
 /*
   The two live values several components need at once.
@@ -45,5 +48,26 @@ export function useQuote(
     refetchInterval: options.isOpen
       ? QUOTE_INTERVAL_OPEN
       : QUOTE_INTERVAL_CLOSED,
+  });
+}
+
+/**
+ * The xStock's around-the-clock price. Only mounted for symbols the server
+ * already found a token for, so it always starts with data and never pops in.
+ * A failed poll keeps the last figure on screen (the query holds its data
+ * through an error) and the panel says so in small print.
+ */
+export function useTokenPrice(
+  symbol: string,
+  options: { initialToken: TokenPrice; isOpen: boolean },
+) {
+  return useQuery({
+    queryKey: keys.token(symbol),
+    queryFn: ({ signal }) => fetchTokenPrice(symbol, signal),
+    initialData: options.initialToken,
+    refetchInterval: options.isOpen
+      ? TOKEN_INTERVAL_OPEN
+      : TOKEN_INTERVAL_CLOSED,
+    retry: 1,
   });
 }

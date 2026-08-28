@@ -33,6 +33,7 @@ const ALLOWED: RegExp[] = [
   /^market\/assets$/,
   /^market\/quotes\/[A-Za-z.]{1,10}$/,
   /^market\/bars\/[A-Za-z.]{1,10}$/,
+  /^market\/token\/[A-Z.-]{1,16}$/,
   /^orders$/,
   /^orders\/[A-Za-z0-9-]{1,64}$/,
   /^positions$/,

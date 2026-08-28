@@ -41,6 +41,7 @@ import type {
   Quote,
   RealizedPl,
   StatementDocument,
+  TokenPrice,
   Transfer,
 } from "@/lib/types";
 
@@ -195,6 +196,15 @@ export function searchAssets(
 
 export function getQuote(symbol: string): Promise<ApiResult<Quote>> {
   return request<Quote>("/market/quotes/" + encodeURIComponent(symbol));
+}
+
+/**
+ * The xStock price beside the share's. Most symbols have no token, and the
+ * API says so with 404 {"detail":"no_token"} — `failure: "not_found"` — which
+ * the trade page treats as "show nothing", not as an error.
+ */
+export function getTokenPrice(symbol: string): Promise<ApiResult<TokenPrice>> {
+  return request<TokenPrice>("/market/token/" + encodeURIComponent(symbol));
 }
 
 export function getBars(

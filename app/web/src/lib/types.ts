@@ -80,6 +80,30 @@ export type Quote = {
  * One OHLCV bar. `t` is an ISO timestamp and o/h/l/c arrive as strings, like
  * every other price the API sends; only the volume is a number.
  */
+/**
+ * The around-the-clock price of a symbol's xStock (GET /market/token/{symbol},
+ * ADR-016). A token backed one-to-one by the real share, priced on Jupiter.
+ *
+ * The Alpaca half (`market_*`, `gap_pct`) is null when the share side is
+ * degraded; `liquidity_usd` and `price_change_24h` are null when Jupiter did
+ * not report them. `gap_pct` is a signed whole percent ("+0.143"): positive
+ * means the token trades above the share. Money is strings (ADR-010).
+ */
+export type TokenPrice = {
+  symbol: string;
+  token: string;
+  name: string;
+  mint: string;
+  usd_price: string;
+  liquidity_usd: string | null;
+  price_change_24h: string | null;
+  block_id: number;
+  market_price: string | null;
+  market_trade_at: string | null;
+  market_open: boolean | null;
+  gap_pct: string | null;
+};
+
 export type Bar = {
   t: string;
   o: string;
