@@ -7,7 +7,6 @@ import {
   QUOTE_INTERVAL_CLOSED,
   QUOTE_INTERVAL_OPEN,
   TOKEN_INTERVAL_CLOSED,
-  TOKEN_INTERVAL_OPEN,
   fetchClock,
   fetchQuote,
   fetchTokenPrice,
@@ -53,7 +52,11 @@ export function useQuote(
 
 /**
  * The xStock's around-the-clock price. Only mounted for symbols the server
- * already found a token for, so it always starts with data and never pops in.
+ * already found a token for, so it always starts with data. The panel only
+ * shows while the market is closed, so the poll runs only then: while the
+ * market is open the query is disabled and makes no request at all. When the
+ * clock flips to closed the query enables and refetches at once (the initial
+ * data is stale by then), so the panel appears without waiting a minute.
  * A failed poll keeps the last figure on screen (the query holds its data
  * through an error) and the panel says so in small print.
  */
@@ -65,9 +68,8 @@ export function useTokenPrice(
     queryKey: keys.token(symbol),
     queryFn: ({ signal }) => fetchTokenPrice(symbol, signal),
     initialData: options.initialToken,
-    refetchInterval: options.isOpen
-      ? TOKEN_INTERVAL_OPEN
-      : TOKEN_INTERVAL_CLOSED,
+    enabled: !options.isOpen,
+    refetchInterval: options.isOpen ? false : TOKEN_INTERVAL_CLOSED,
     retry: 1,
   });
 }

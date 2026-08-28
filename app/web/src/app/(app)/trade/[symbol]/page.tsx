@@ -80,7 +80,9 @@ export default async function SymbolPage({
   const initialQuote = quote.ok ? quote.data : undefined;
   // Most symbols have no xStock (404 "no_token"), and a Jupiter outage (502)
   // is not worth a panel either: the panel exists only when there is a token
-  // price to show, so pages without one keep exactly their old layout.
+  // price to show, so pages without one keep exactly their old layout. The
+  // panel itself renders nothing while the market is open (it owns its card),
+  // and appears by itself at the close.
   const initialToken = token.ok ? token.data : undefined;
 
   return (
@@ -123,21 +125,11 @@ export default async function SymbolPage({
           </Panel>
 
           {initialToken ? (
-            <Panel>
-              <PanelHead
-                title="Around the clock"
-                aside={
-                  <span className="text-[12px] text-ink-faint">
-                    {initialToken.token} on Jupiter
-                  </span>
-                }
-              />
-              <TokenPricePanel
-                symbol={symbol}
-                initialToken={initialToken}
-                initialClock={initialClock}
-              />
-            </Panel>
+            <TokenPricePanel
+              symbol={symbol}
+              initialToken={initialToken}
+              initialClock={initialClock}
+            />
           ) : null}
 
           <Panel>

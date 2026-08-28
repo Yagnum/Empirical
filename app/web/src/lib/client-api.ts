@@ -195,10 +195,10 @@ export const QUOTE_INTERVAL_CLOSED = 30_000;
 export const ORDERS_INTERVAL = 10_000;
 /*
   The token price is a reference figure, not something anyone trades on here,
-  and the sampler behind ADR-016 records it every five minutes. Thirty seconds
-  in hours keeps it honest beside the quote; a minute off-hours is plenty.
+  and the sampler behind ADR-016 records it every five minutes. It is only
+  shown while the market is closed, and a minute off-hours is plenty; while
+  the market is open it is not polled at all.
 */
-export const TOKEN_INTERVAL_OPEN = 30_000;
 export const TOKEN_INTERVAL_CLOSED = 60_000;
 export const CLOCK_INTERVAL = 60_000;
 /** While a reset is liquidating: how often to ask whether the account is flat. */

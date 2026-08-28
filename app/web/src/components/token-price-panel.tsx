@@ -1,34 +1,33 @@
 "use client";
 
 import { deltaGlyph } from "@/components/delta";
-import { formatEtClock, formatEtTime } from "@/lib/datetime";
+import { Panel, PanelHead } from "@/components/panel";
+import { formatSessionMoment } from "@/lib/datetime";
 import { useMarketClock, useTokenPrice } from "@/lib/hooks";
-import {
-  EM_DASH,
-  direction,
-  formatPrice,
-  formatSignedPercent,
-  formatUsd,
-} from "@/lib/money";
+import { direction, formatPrice, formatSignedPercent } from "@/lib/money";
 import type { MarketClock, TokenPrice } from "@/lib/types";
 
 /*
-  The same share, still trading.
+  The share, still trading after the close.
 
   An xStock is a token backed one-to-one by a real share, and it trades on
-  Jupiter around the clock. This panel sets the token's price beside the
-  share's last trade on Alpaca, with the gap between them, so the weekend
-  price the paper's reserve is measured against (ADR-016) is visible in the
-  app itself. Yagnum does not trade the token; the panel says so.
+  Jupiter around the clock. While the market is open this panel does not
+  exist: the Quote panel is the price, and a second, near-identical figure
+  beside it only made newcomers ask which one was real (owner decision,
+  2026-08-28). While the market is closed the token is the only live price,
+  so the panel appears — by itself, at 4:00 PM ET, because it subscribes to
+  the same clock query the rest of the page polls — and leads with the
+  situation in plain words for someone new to trading.
 
   This is the one place crypto enters the product, and it must not look like
   it: the same statement-card type, the same figures, no colour that is not
-  already in the palette. The gap is set in the neutral ink, not gain or loss
-  colour — a token above the share is not a gain for anyone reading this,
-  only a direction. The arrow and sign still carry it.
+  already in the palette. The move since the close is set in the neutral ink,
+  not gain or loss colour — a token above the share is not good news for
+  anyone reading this, only a direction. The arrow and sign still carry it.
 
-  The page mounts this only for symbols the server found a token for, so the
-  first paint is always populated and the panel never pops in.
+  The page mounts this only for symbols the server found a token for, with
+  the server's own first fetch as initial data, so a closed-market first
+  paint is populated and never pops in.
 */
 
 export function TokenPricePanel({
@@ -41,111 +40,107 @@ export function TokenPricePanel({
   initialClock?: MarketClock;
 }) {
   const clock = useMarketClock(initialClock);
-  const isOpen = clock.data?.is_open ?? false;
+  const clockOpen = clock.data?.is_open;
+  // Until the clock has answered, trust the token's own view of the session.
+  const isOpen = clockOpen ?? initialToken.market_open ?? false;
   const token = useTokenPrice(symbol, { initialToken, isOpen });
 
   // The query keeps its last data through a failed poll, so `data` is always
   // present; a failure only changes the small print.
   const data = token.data ?? initialToken;
-  // Alpaca's own view of the session wins when it is there; the clock the rest
-  // of the page uses fills in when the share side of the response is degraded.
-  const marketOpen = data.market_open ?? isOpen;
-  const gap = direction(data.gap_pct);
-  const glyph = deltaGlyph(gap);
+
+  /*
+    The clock decides when the panel comes and goes, because it is the thing
+    that polls while the market is open. The token's own `market_open` (from
+    Alpaca, on the same response as the price) refines it: right after the
+    close the token data on hand can still be the one fetched during hours,
+    and it says "open" until the first closed-hours poll lands a second later.
+    Right after the open the clock alone hides the panel, whatever the last
+    token poll said.
+  */
+  const marketOpen =
+    clockOpen === undefined
+      ? (data.market_open ?? false)
+      : clockOpen || data.market_open === true;
+
+  if (marketOpen) return null;
+
+  const change = direction(data.gap_pct);
+  const glyph = deltaGlyph(change);
+  const hasClose = data.market_price !== null;
 
   return (
-    <div className="px-6 py-6 sm:px-8">
-      <p className="max-w-xl text-[13px] leading-relaxed text-ink-soft">
-        <span className="font-medium text-ink">{data.token}</span> is a token
-        backed one-to-one by a real {symbol} share. It trades on Jupiter around
-        the clock, including weekends.
-      </p>
+    <Panel>
+      <PanelHead
+        title="After hours"
+        aside={
+          <span className="text-[12px] text-ink-faint">
+            {data.token} on Jupiter
+          </span>
+        }
+      />
+      <div className="px-6 py-6 sm:px-8">
+        <h2 className="max-w-xl font-display text-[1.25rem] leading-snug font-semibold tracking-[-0.02em] text-ink">
+          The market is closed. {symbol} still trades — as a token.
+        </h2>
 
-      <dl className="mt-6 grid grid-cols-1 gap-x-8 gap-y-6 sm:grid-cols-[1fr_auto_1fr] sm:items-start">
-        <div>
-          <dt className="stat-label">{data.token} on Jupiter</dt>
-          <dd className="figure-nums mt-2.5 text-2xl leading-none font-semibold tracking-[-0.015em] text-ink">
-            {formatPrice(data.usd_price)}
-          </dd>
-          <p className="mt-2 text-[12px] text-ink-faint">
-            {marketOpen ? "Live, same as the share" : "Live while the market is closed"}
-          </p>
-        </div>
-
-        <div className="sm:pt-1">
-          <dt className="stat-label">Gap</dt>
-          <dd className="figure-nums mt-2.5 inline-flex items-baseline gap-1.5 text-[17px] font-semibold text-ink-soft">
-            {glyph ? (
-              <span aria-hidden className="text-[0.8em]">
-                {glyph}
-              </span>
+        <div className="mt-6 grid gap-x-10 gap-y-6 md:grid-cols-[auto_minmax(0,1fr)] md:items-start">
+          <dl>
+            <dt className="stat-label">{data.token} right now</dt>
+            <dd className="figure-nums mt-2.5 text-[2rem] leading-none font-semibold tracking-[-0.02em] text-ink">
+              {formatPrice(data.usd_price)}
+            </dd>
+            {hasClose ? (
+              <>
+                <dd className="figure-nums mt-3 text-[13px] text-ink-soft">
+                  {symbol} closed at{" "}
+                  <span className="font-medium text-ink">
+                    {formatPrice(data.market_price)}
+                  </span>
+                  <span className="text-ink-faint">
+                    {" · "}
+                    {formatSessionMoment(data.market_trade_at)}
+                  </span>
+                </dd>
+                {data.gap_pct !== null ? (
+                  <dd className="figure-nums mt-1.5 inline-flex items-baseline gap-1.5 text-[13px] font-medium text-ink-soft">
+                    {glyph ? (
+                      <span aria-hidden className="text-[0.8em]">
+                        {glyph}
+                      </span>
+                    ) : null}
+                    <span>
+                      {formatSignedPercent(data.gap_pct, true)} since the close
+                    </span>
+                  </dd>
+                ) : null}
+              </>
             ) : null}
-            <span>{formatSignedPercent(data.gap_pct, true)}</span>
-          </dd>
-          <p className="mt-2 text-[12px] text-ink-faint">
-            {describeGap(data.gap_pct, gap)}
-          </p>
+          </dl>
+
+          <div className="max-w-md text-[13px] leading-relaxed text-ink-soft">
+            <p>
+              <span className="font-medium text-ink">{data.token}</span> is a
+              token. For each token, a custodian holds one real {symbol} share.
+              The token trades on Jupiter, a crypto exchange, at all hours. Its
+              price shows what buyers and sellers think {symbol} is worth while
+              the stock market is closed.
+            </p>
+            <p className="mt-3">
+              When the market opens, the real share can open at a different
+              price. Yagnum does not trade {data.token}. The price is shown for
+              information only.
+            </p>
+          </div>
         </div>
 
-        <div>
-          <dt className="stat-label">{symbol} share on Alpaca</dt>
-          <dd className="figure-nums mt-2.5 text-2xl leading-none font-semibold tracking-[-0.015em] text-ink">
-            {formatPrice(data.market_price)}
-          </dd>
-          <p className="mt-2 text-[12px] text-ink-faint">
-            {describeShare(data, marketOpen)}
-          </p>
-        </div>
-      </dl>
-
-      {!marketOpen && data.market_price !== null ? (
-        <p className="mt-5 max-w-xl text-[13px] leading-relaxed text-ink-soft">
-          The market is closed, so the share price is the last one before the
-          close. Until it opens again, the token is the only live price.
-        </p>
-      ) : null}
-
-      <div className="mt-6 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-t border-rule-soft pt-4">
-        <p className="text-[12px] text-ink-faint">
-          Pool depth{" "}
-          <span className="figure-nums font-medium text-ink-soft">
-            {data.liquidity_usd === null ? EM_DASH : formatUsd(data.liquidity_usd)}
-          </span>
-          <span className="hidden sm:inline">
-            {" "}
-            — the dollars in the Jupiter pool behind this price
-          </span>
-        </p>
-        <p className="text-[12px] text-ink-faint">
+        <p className="mt-6 border-t border-rule-soft pt-4 text-[12px] text-ink-faint">
           {token.isError
-            ? "Jupiter isn’t answering right now · showing the last price we had"
-            : marketOpen
-              ? "updating every 30 seconds"
-              : "updating every minute"}
+            ? "Jupiter is not answering right now · showing the last price we had"
+            : "updating every minute"}
           {token.isFetching && !token.isError ? " · updating" : ""}
         </p>
       </div>
-
-      <p className="mt-4 text-[12px] leading-relaxed text-ink-faint">
-        Yagnum does not trade {data.token}. It is shown so you can see the
-        weekend price the paper&rsquo;s reserve is measured against.
-      </p>
-    </div>
+    </Panel>
   );
-}
-
-/** A direction, never a gain: the gap is not something the reader earns. */
-function describeGap(gapPct: string | null, dir: -1 | 0 | 1): string {
-  if (gapPct === null) return "Needs both prices to compare";
-  if (dir === 0) return "Token and share are level";
-  return dir > 0 ? "Token above the share" : "Token below the share";
-}
-
-function describeShare(data: TokenPrice, marketOpen: boolean): string {
-  if (data.market_price === null) return "Share price unavailable right now";
-  const at = data.market_trade_at;
-  if (!marketOpen) {
-    return `Last trade before the close, ${formatEtTime(at)}`;
-  }
-  return `Last trade, ${formatEtClock(at)}`;
 }
