@@ -118,8 +118,11 @@ def fetch_candles(pool: str, timeframe: str, cutoff: dt.datetime) -> list[list]:
     """Every candle from now back to `cutoff` (or the 180-day wall), newest first.
 
     Pages backwards: each request's `before_timestamp` is the oldest `ts` of
-    the page before it. Stops on the history-limit 401, on an empty or short
-    page, or once a page reaches past the cutoff.
+    the page before it. Stops on the history-limit 401, on an empty page, or
+    once a page reaches past the cutoff. A *short* page is not the end: a
+    thin pool has no candle for an hour with no trades, so pages come back
+    with fewer than PAGE_LIMIT rows long before the wall (seen live: AVGOx
+    returned 594 rows, then 677 more behind them).
     """
     cutoff_ts = int(cutoff.timestamp())
     collected: list[list] = []
@@ -133,7 +136,7 @@ def fetch_candles(pool: str, timeframe: str, cutoff: dt.datetime) -> list[list]:
             break
         collected.extend(row for row in page if int(row[0]) >= cutoff_ts)
         oldest = min(int(row[0]) for row in page)
-        if oldest <= cutoff_ts or len(page) < geckoterminal.PAGE_LIMIT:
+        if oldest <= cutoff_ts:
             break
         before = oldest
     return collected

@@ -17,8 +17,8 @@ not an error, and it is raised as `HistoryLimitReached` (a subclass of
 still fails loudly.
 
 RATE LIMIT. About 30 calls a minute. Every call sleeps `CALL_INTERVAL_SECONDS`
-first (2.1 s keeps us just under), and a 429 is retried once after a longer
-pause. A full backfill is a few hundred calls; slow and polite beats banned.
+first (2.1 s keeps us just under), and a 429 is retried twice after growing
+pauses (the live run showed one retry is not always enough). A full backfill is a few hundred calls; slow and polite beats banned.
 
 NUMBERS ARRIVE AS STRINGS (ADR-010): `parse_float=str`, as in jupiter.py.
 """
@@ -41,7 +41,8 @@ PAGE_LIMIT = 1000
 HISTORY_DAYS = 180
 
 CALL_INTERVAL_SECONDS = 2.1
-RATE_LIMIT_RETRY_SECONDS = 15.0
+RATE_LIMIT_RETRY_SECONDS = 20.0
+RATE_LIMIT_ATTEMPTS = 3
 
 TIMEFRAMES = ("hour", "day")
 
@@ -69,10 +70,10 @@ def _is_history_limit(response: httpx.Response) -> bool:
 
 
 def _get(path: str, params: dict | None = None) -> Any:
-    """One GET with the rate-limit pause, one retry on 429, numbers as text."""
+    """One GET with the rate-limit pause, retries on 429, numbers as text."""
     url = BASE_URL + path
     headers = {"accept": "application/json"}
-    for attempt in (1, 2):
+    for attempt in range(1, RATE_LIMIT_ATTEMPTS + 1):
         _sleep(CALL_INTERVAL_SECONDS)
         try:
             with httpx.Client(timeout=settings.http_timeout_seconds) as client:
@@ -81,8 +82,8 @@ def _get(path: str, params: dict | None = None) -> Any:
             raise GeckoTerminalError(f"timed out calling {path}") from exc
         except httpx.HTTPError as exc:
             raise GeckoTerminalError(f"network error calling {path}: {type(exc).__name__}") from exc
-        if response.status_code == 429 and attempt == 1:
-            _sleep(RATE_LIMIT_RETRY_SECONDS)
+        if response.status_code == 429 and attempt < RATE_LIMIT_ATTEMPTS:
+            _sleep(RATE_LIMIT_RETRY_SECONDS * attempt)
             continue
         break
     if _is_history_limit(response):

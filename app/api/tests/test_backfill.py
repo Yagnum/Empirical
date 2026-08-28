@@ -136,6 +136,28 @@ def test_pager_uses_oldest_ts_and_stops_at_the_wall(monkeypatch):
     assert len(rows) == 2 * geckoterminal.PAGE_LIMIT
 
 
+def test_pager_keeps_going_after_a_short_page(monkeypatch):
+    """A thin pool skips empty hours, so a short page is not the last page."""
+    hour = 3600
+    newest = int(NOW.timestamp())
+    short = [[newest - i * 5 * hour, 1, 1, 1, 1, 0] for i in range(50)]  # gappy
+    older = [[short[-1][0] - (i + 1) * 5 * hour, 1, 1, 1, 1, 0] for i in range(40)]
+    befores = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        befores.append(request.url.params.get("before_timestamp"))
+        if len(befores) == 1:
+            return httpx.Response(200, json=_ohlcv_body(short))
+        if len(befores) == 2:
+            return httpx.Response(200, json=_ohlcv_body(older))
+        return httpx.Response(200, json=_ohlcv_body([]))  # empty page ends it
+
+    _mock_http(monkeypatch, handler)
+    rows = backfill.fetch_candles(POOL, "hour", datetime(2025, 1, 1, tzinfo=timezone.utc))
+    assert befores == [None, str(short[-1][0]), str(older[-1][0])]
+    assert len(rows) == 90
+
+
 def test_pager_stops_at_the_cutoff_and_drops_older_candles(monkeypatch):
     hour = 3600
     newest = int(NOW.timestamp())
