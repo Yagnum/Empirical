@@ -151,6 +151,7 @@ def test_health_is_public(anon_client):
         ("GET", "/activities/export.csv"),
         ("GET", "/documents"),
         ("GET", "/pnl/preview?symbol=AAPL&qty=1"),
+        ("GET", "/market/token/NVDA"),
     ],
 )
 def test_every_route_requires_a_token(anon_client, method, path):

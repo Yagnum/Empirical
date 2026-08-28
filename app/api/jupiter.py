@@ -25,6 +25,7 @@ NO SWAPS. This client never signs a transaction and never touches a wallet.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterable
 from typing import Any
 
@@ -104,6 +105,33 @@ def list_xstocks() -> list[dict]:
         if is_xstock(token) and token.get("id")
     ]
     return sorted(found, key=lambda entry: entry["symbol"])
+
+
+# The xStocks list changes on the order of weeks; the trade page asks for it
+# on every load. One process-wide copy, refreshed at most every 15 minutes,
+# the same pattern as alpaca.active_equity_assets.
+_XSTOCKS_TTL_SECONDS = 900
+_xstocks_cache: tuple[float, list[dict]] | None = None
+
+
+def cached_xstocks(*, force_refresh: bool = False) -> list[dict]:
+    """`list_xstocks()`, memoised for 15 minutes."""
+    global _xstocks_cache
+    now = time.monotonic()
+    if not force_refresh and _xstocks_cache and now - _xstocks_cache[0] < _XSTOCKS_TTL_SECONDS:
+        return _xstocks_cache[1]
+    tokens = list_xstocks()
+    _xstocks_cache = (now, tokens)
+    return tokens
+
+
+def xstock_for(underlying: str) -> dict | None:
+    """The xStock that mirrors this listed share ('NVDA' -> the NVDAx entry), or None."""
+    wanted = underlying.upper()
+    for token in cached_xstocks():
+        if token["underlying"] == wanted:
+            return token
+    return None
 
 
 def prices(mints: Iterable[str]) -> dict[str, dict]:

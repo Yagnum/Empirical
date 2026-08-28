@@ -203,3 +203,75 @@ def bars(
         }
         for bar in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# The token that trades when the market does not (ADR-016, ADR-017)
+# ---------------------------------------------------------------------------
+
+import jupiter  # noqa: E402
+import sampler  # noqa: E402
+from decimal import Decimal, ROUND_HALF_UP  # noqa: E402
+
+_GAP_PLACES = Decimal("0.001")
+
+
+def gap_percent(token_price: Decimal, market_price: Decimal | None) -> str | None:
+    """(token / share - 1) x 100 as a signed string to three places, or None.
+
+    Decimal all the way (ADR-010). Signed on purpose: "+0.143" says the token
+    trades *above* the share, and that direction is the whole story.
+    """
+    if market_price is None or market_price <= 0:
+        return None
+    gap = (token_price / market_price - Decimal("1")) * Decimal("100")
+    return format(gap.quantize(_GAP_PLACES, rounding=ROUND_HALF_UP), "+f")
+
+
+@router.get("/market/token/{symbol}")
+def token_price(symbol: str = Path(..., min_length=1, max_length=16)) -> dict:
+    """The tokenized twin of a listed share, priced right now on Jupiter.
+
+    An xStock (NVDAx for NVDA) is one real share held in custody, mirrored as
+    a Solana token that trades around the clock. While the market is open the
+    two prices track closely; on a weekend the token is the only live price
+    there is, and the distance between them at Monday's first execution is
+    what the paper's reserve is sized against. This route shows that distance
+    live, as `gap_pct`, beside both prices.
+
+    404 `no_token` when no xStock mirrors this symbol (most stocks). The
+    Alpaca side is best-effort - the token price is the point of the call, so
+    a slow broker feed leaves `market_*` null rather than failing it.
+    """
+    underlying = symbol.upper()
+    try:
+        token = jupiter.xstock_for(underlying)
+        quote = jupiter.prices([token["mint"]]).get(token["mint"]) if token else None
+    except jupiter.JupiterError as exc:
+        raise HTTPException(status_code=502, detail=f"jupiter_unreachable: {exc.message}") from exc
+    if token is None:
+        raise HTTPException(status_code=404, detail="no_token")
+    usd_price = sampler._decimal((quote or {}).get("usdPrice"))
+    if usd_price is None:
+        raise HTTPException(status_code=502, detail="jupiter_unreachable: no price for the token")
+
+    trades, market_open = sampler.market_side([underlying])
+    trade = trades.get(underlying) or {}
+    market_price = sampler._decimal(trade.get("p"))
+    traded_at = sampler._moment(trade.get("t"))
+    block_id = (quote or {}).get("blockId")
+
+    return {
+        "symbol": underlying,
+        "token": token["symbol"],
+        "name": token["name"],
+        "mint": token["mint"],
+        "usd_price": format(usd_price, "f"),
+        "liquidity_usd": _price((quote or {}).get("liquidity")) or None,
+        "price_change_24h": _price((quote or {}).get("priceChange24h")) or None,
+        "block_id": block_id if isinstance(block_id, int) else None,
+        "market_price": format(market_price, "f") if market_price is not None else None,
+        "market_trade_at": traded_at.isoformat().replace("+00:00", "Z") if traded_at else None,
+        "market_open": market_open,
+        "gap_pct": gap_percent(usd_price, market_price),
+    }

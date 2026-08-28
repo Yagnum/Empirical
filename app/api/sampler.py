@@ -54,7 +54,7 @@ def _moment(value) -> datetime | None:
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
 
-def _market_side(underlyings: list[str]) -> tuple[dict[str, dict], bool | None]:
+def market_side(underlyings: list[str]) -> tuple[dict[str, dict], bool | None]:
     """Alpaca's last trades and clock, or empty/None if Alpaca is unreachable."""
     trades: dict[str, dict] = {}
     market_open: bool | None = None
@@ -74,7 +74,7 @@ def sample_once(now: datetime | None = None) -> list[TokenPrice]:
     sampled_at = now or datetime.now(timezone.utc)
     tokens = jupiter.list_xstocks()
     quotes = jupiter.prices(token["mint"] for token in tokens)
-    trades, market_open = _market_side(
+    trades, market_open = market_side(
         sorted({token["underlying"] for token in tokens if token["underlying"]})
     )
 
