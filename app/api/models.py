@@ -37,6 +37,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -266,3 +267,84 @@ class TokenPrice(Base):
     # Alpaca's clock at sampling time; null if the clock call failed.
     market_open: Mapped[bool | None] = mapped_column(Boolean)
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="jupiter_price_v3")
+
+
+class TokenCandle(Base):
+    """One GeckoTerminal OHLCV candle for an xStock's deepest pool (ADR-016).
+
+    The sampler (`token_prices`) only began recording on 2026-08-28. The
+    paper's sigma_gap needs *past* weekends - many of them - and the only
+    free source that keeps a Solana token's history at hourly resolution is
+    GeckoTerminal, which serves the last 180 days of candles per pool. This
+    table is that history, backfilled once (`backfill.backfill_token`) and
+    extendable by re-running: the unique key makes a second pass a no-op.
+
+    A candle belongs to a *pool*, not to the token: the same NVDAx trades in
+    several pools with different depth and different prices. We keep the
+    deepest USDC pool (the one Jupiter would route most size through) and
+    record which, so a later reader can tell one pool's history from another.
+
+    `bucket_start` is the candle's opening moment in UTC; GeckoTerminal sends
+    it as a unix timestamp. Prices arrive as JSON numbers and are decoded as
+    strings (ADR-010) before becoming NUMERIC.
+    """
+
+    __tablename__ = "token_candles"
+    __table_args__ = (
+        UniqueConstraint("pool", "timeframe", "bucket_start"),
+        Index("ix_token_candles_symbol_timeframe_bucket", "symbol", "timeframe", "bucket_start"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)  # NVDAx
+    mint: Mapped[str] = mapped_column(String(64), nullable=False)
+    # The Solana address of the liquidity pool the candle was built from.
+    pool: Mapped[str] = mapped_column(String(64), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(8), nullable=False)  # 'hour' | 'day'
+    bucket_start: Mapped[dt.datetime] = mapped_column(TZ, nullable=False)
+    open: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    high: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    low: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    close: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    volume_usd: Mapped[Decimal | None] = mapped_column(MONEY)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="geckoterminal")
+
+
+class MarketBar(Base):
+    """One Alpaca bar for a real share - the regulated side of the gap.
+
+    Two timeframes, two jobs:
+
+    '1Day'  Years of daily closes for every underlying. Friday's close is
+            P_MKT at the moment the market shuts and the token keeps trading;
+            the daily series is how the notebook lines a weekend's token
+            candles up against the last regulated print before them.
+    '1Min'  Monday mornings only, 04:00-10:30 ET. ADR-017 closes the Monday
+            leg premarket, as early as it is liquid, so the notebook needs
+            every minute from the first extended-hours print through the
+            9:30 auction and the half hour after it - the candidates for the
+            settlement moment. IEX minute bars include extended hours.
+
+    `volume` and `trade_count` are kept because liquidity *is* the question:
+    a 4:07 AM bar with three trades is not a price anyone can settle at.
+    `vwap` is Alpaca's own volume-weighted price for the bar.
+    """
+
+    __tablename__ = "market_bars"
+    __table_args__ = (
+        UniqueConstraint("symbol", "timeframe", "bucket_start"),
+        Index("ix_market_bars_symbol_timeframe_bucket", "symbol", "timeframe", "bucket_start"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)  # NVDA
+    timeframe: Mapped[str] = mapped_column(String(8), nullable=False)  # '1Day' | '1Min'
+    bucket_start: Mapped[dt.datetime] = mapped_column(TZ, nullable=False)
+    open: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    high: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    low: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    close: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    volume: Mapped[Decimal | None] = mapped_column(Numeric(28, 10))
+    trade_count: Mapped[int | None] = mapped_column(Integer)
+    vwap: Mapped[Decimal | None] = mapped_column(MONEY)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="alpaca_iex")

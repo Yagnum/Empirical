@@ -50,7 +50,7 @@ TEST_ACCOUNT_ID = "acct-test-0001"
 TEST_SCHEMA = f"yagnum_test_{os.getpid()}"
 
 # Truncated between tests. Children first: the FKs point at `fills`.
-_TABLES = ["audit_log", "order_intents", "realized_pnl", "lots", "fills"]
+_TABLES = ["audit_log", "order_intents", "realized_pnl", "lots", "fills", "token_prices", "token_candles", "market_bars"]
 
 
 @pytest.fixture(autouse=True)
