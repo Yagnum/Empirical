@@ -62,6 +62,37 @@ that script's example values) and regenerate.
 - **Fills only happen while the market is open.** `GET /market/clock` tells
   you whether it is, and when it next opens.
 
+## The Jupiter trade flow (a second, hand-written collection)
+
+`jupiter-flow.postman_collection.json` is different: it is not generated,
+and it does not exercise Yagnum's routes. It walks the whole life of a token
+trade on Jupiter, one request per step, in order:
+
+| Step | Request | What you learn |
+| --- | --- | --- |
+| 1 | Token search | The mint address is the token's identity; the symbol is not |
+| 2 | Price | The last swap price — for watching, never for trading |
+| 3 | Quote, sell direction | The bid: base units in, USDC out, the effective price |
+| 4 | Quote, buy direction | The ask, and the spread between 3 and 4 |
+| 5 | Swap build | The unsigned transaction — the step Yagnum never signs |
+| 6 | Solana: latest swaps on the pool | The public ledger, including failed swaps |
+| 7 | Solana: one transaction in full | Balances before and after; decimals carried with every amount |
+| 8 | Yagnum `GET /market/token/NVDA` | How the app wraps step 1 and 2 (needs the API and a token) |
+
+To use it:
+
+1. Import the file. It carries its own variables; no environment file is
+   needed. Steps 1–7 need no token and no server.
+2. Open the Postman console (**View → Show Postman Console**). Each step's
+   Tests tab decodes the reply into plain language there — base units to
+   tokens, the effective price, the spread, the on-chain outcome.
+3. Send the requests in order. Step 1 saves the mint for the rest; step 3
+   saves the quote that step 5 needs; step 6 saves a signature for step 7.
+4. Read `docs/JUPITER-FLOW.md` alongside. Its sections match the steps.
+
+Nothing in this collection moves money. The wallet address in step 5 is a
+placeholder public key, and no private key exists anywhere in the project.
+
 ## Regenerating
 
 With the API running:

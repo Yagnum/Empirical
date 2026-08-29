@@ -1,0 +1,320 @@
+{
+  "info": {
+    "name": "Yagnum — Jupiter trade flow (read-only)",
+    "description": "The whole life of a token trade on Jupiter, one request per step, in order. Run them top to bottom. Each step's Tests tab decodes the reply, prints what it means to the Postman console (View → Show Postman Console), and saves values the next step needs.\n\nNothing here signs or sends a transaction. Steps 1–5 are read-only calls to Jupiter; steps 6–7 read the public Solana ledger; step 8 is Yagnum's own API.\n\nRead docs/JUPITER-FLOW.md alongside: its sections 1–6 match steps 1–7 here.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "jupLite", "value": "https://lite-api.jup.ag" },
+    { "key": "jupPriceHost", "value": "https://lite-api.jup.ag" },
+    { "key": "solanaRpc", "value": "https://api.mainnet-beta.solana.com" },
+    { "key": "usdcMint", "value": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" },
+    { "key": "symbol", "value": "NVDAx" },
+    { "key": "tokenMint", "value": "" },
+    { "key": "tokenDecimals", "value": "8" },
+    { "key": "usdcDecimals", "value": "6" },
+    { "key": "sellTokens", "value": "10" },
+    { "key": "buyUsdc", "value": "1000" },
+    { "key": "slippageBps", "value": "50" },
+    { "key": "poolAddress", "value": "49iMatQtoyabsYAQc8GafVq6aeBFVDxSRH44oiatyyw6" },
+    { "key": "placeholderWallet", "value": "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1" },
+    { "key": "yagnumApi", "value": "http://localhost:8000" },
+    { "key": "clerkToken", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Find the token (search)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{jupLite}}/tokens/v2/search?query=xStock",
+          "host": ["{{jupLite}}"],
+          "path": ["tokens", "v2", "search"],
+          "query": [{ "key": "query", "value": "xStock", "description": "Free text. 'xStock' returns every Backed tokenized equity." }]
+        },
+        "description": "**Input:** a search string.\n\n**Output:** a list of tokens. For each: `id` (the mint address — the token's real identity), `symbol`, `name`, `decimals` (how the token counts, see step 2), `mintAuthority` (who may create new tokens; all real xStocks share Backed's), `usdPrice`, `liquidity`, `holderCount`.\n\n**What we take from it:** the mint address and the decimals of the token whose symbol equals `{{symbol}}`. The Tests tab saves both. Everything after this step uses the mint, never the symbol.\n\n**The trap:** two tokens can share a symbol. Only the mint is unique."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const tokens = pm.response.json();",
+              "const want = pm.variables.get('symbol');",
+              "const real = tokens.filter(t => t.name && t.name.endsWith('xStock') && t.symbol === want);",
+              "pm.test('one real ' + want + ' found', () => pm.expect(real.length).to.eql(1));",
+              "const t = real[0];",
+              "pm.collectionVariables.set('tokenMint', t.id);",
+              "pm.collectionVariables.set('tokenDecimals', String(t.decimals));",
+              "console.log('token', t.symbol, '| mint', t.id, '| decimals', t.decimals, '| mintAuthority', t.mintAuthority);",
+              "console.log('last price $' + t.usdPrice, '| liquidity $' + Math.round(t.liquidity), '| holders', t.holderCount);",
+              "console.log('xStocks in this reply:', tokens.filter(x => x.name && x.name.endsWith('xStock')).map(x => x.symbol).sort().join(' '));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Price (observe, do not trade)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{jupPriceHost}}/price/v3?ids={{tokenMint}},{{usdcMint}}",
+          "host": ["{{jupPriceHost}}"],
+          "path": ["price", "v3"],
+          "query": [{ "key": "ids", "value": "{{tokenMint}},{{usdcMint}}", "description": "Comma-separated mint addresses, up to 50." }]
+        },
+        "description": "**Input:** mint addresses.\n\n**Output:** per mint: `usdPrice` (the last swap price, any size, any pool), `liquidity`, `blockId` (the Solana block of that swap — a recency check), `priceChange24h`, and for xStocks a `scaledUiConfig.multiplier` (dividend adjustment; the price already includes it).\n\n**What it is for:** watching. This is what Yagnum's after-hours panel and its 5-minute sampler read.\n\n**The trap:** it is the middle of the market. No trade fills at the middle — step 3 and 4 show what a trade actually gets."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "const t = body[pm.variables.get('tokenMint')];",
+              "const u = body[pm.variables.get('usdcMint')];",
+              "pm.test('token has a price', () => pm.expect(t && t.usdPrice).to.be.a('number'));",
+              "console.log('token last swap price $' + t.usdPrice, '| block', t.blockId, '| 24h', t.priceChange24h + '%');",
+              "console.log('USDC price $' + (u ? u.usdPrice : '?'), '(a dollar-token should sit at ~1.00)');",
+              "if (t.scaledUiConfig) console.log('scaled UI multiplier', t.scaledUiConfig.multiplier, '(dividends folded into the display amount)');",
+              "pm.collectionVariables.set('midPrice', String(t.usdPrice));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Quote — SELL direction (the bid)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{jupLite}}/swap/v1/quote?inputMint={{tokenMint}}&outputMint={{usdcMint}}&amount={{sellBaseUnits}}&slippageBps={{slippageBps}}",
+          "host": ["{{jupLite}}"],
+          "path": ["swap", "v1", "quote"],
+          "query": [
+            { "key": "inputMint", "value": "{{tokenMint}}", "description": "What you give: the token." },
+            { "key": "outputMint", "value": "{{usdcMint}}", "description": "What you get: USDC." },
+            { "key": "amount", "value": "{{sellBaseUnits}}", "description": "In BASE UNITS of the input token: sellTokens × 10^tokenDecimals. Computed by the pre-request script." },
+            { "key": "slippageBps", "value": "{{slippageBps}}", "description": "Tolerance in basis points. 50 = 0.50%." }
+          ]
+        },
+        "description": "**Input:** you give `{{sellTokens}}` tokens. The pre-request script converts that to base units: `sellTokens × 10^decimals`. For NVDAx (8 decimals), 10 tokens = `1000000000`.\n\n**Output:** `outAmount` = USDC you receive, in USDC base units (÷ 10^6 for dollars). `priceImpactPct` = how much your own trade moved the pool. `otherAmountThreshold` = the guaranteed minimum after slippage; below this the chain rejects the fill. `routePlan` = the pool(s) used.\n\n**What it means:** this is the **bid** — the price a seller receives. In the paper it is `P_open` for a sell (δ = −1). Yagnum's engine uses exactly this number for a weekend sale.\n\n**The Tests tab** computes the effective price per token and saves the whole quote for step 5."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const dec = Number(pm.variables.get('tokenDecimals'));",
+              "const tokens = Number(pm.variables.get('sellTokens'));",
+              "const base = BigInt(Math.round(tokens * 10 ** dec)).toString();",
+              "pm.collectionVariables.set('sellBaseUnits', base);",
+              "console.log('SELL', tokens, 'tokens =', base, 'base units (× 10^' + dec + ')');"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const q = pm.response.json();",
+              "pm.test('quote returned', () => pm.expect(q.outAmount).to.be.a('string'));",
+              "const tokDec = Number(pm.variables.get('tokenDecimals')), usdDec = Number(pm.variables.get('usdcDecimals'));",
+              "const tokens = Number(q.inAmount) / 10 ** tokDec;",
+              "const usdc = Number(q.outAmount) / 10 ** usdDec;",
+              "const px = usdc / tokens;",
+              "console.log('you give', tokens, 'tokens → you receive', usdc.toFixed(6), 'USDC');",
+              "console.log('BID (effective sell price) $' + px.toFixed(4), '| price impact', q.priceImpactPct + '%', '| min guaranteed', Number(q.otherAmountThreshold) / 10 ** usdDec, 'USDC');",
+              "console.log('route:', q.routePlan.map(s => s.swapInfo.label).join(' → '));",
+              "const mid = Number(pm.variables.get('midPrice'));",
+              "if (mid) console.log('vs last price $' + mid, '→ bid is', ((px / mid - 1) * 100).toFixed(3) + '% from the middle');",
+              "pm.collectionVariables.set('bidPrice', px.toFixed(6));",
+              "pm.collectionVariables.set('sellQuote', JSON.stringify(q));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Quote — BUY direction (the ask)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{jupLite}}/swap/v1/quote?inputMint={{usdcMint}}&outputMint={{tokenMint}}&amount={{buyBaseUnits}}&slippageBps={{slippageBps}}",
+          "host": ["{{jupLite}}"],
+          "path": ["swap", "v1", "quote"],
+          "query": [
+            { "key": "inputMint", "value": "{{usdcMint}}", "description": "What you give: USDC." },
+            { "key": "outputMint", "value": "{{tokenMint}}", "description": "What you get: the token." },
+            { "key": "amount", "value": "{{buyBaseUnits}}", "description": "In BASE UNITS of USDC: buyUsdc × 10^6." },
+            { "key": "slippageBps", "value": "{{slippageBps}}" }
+          ]
+        },
+        "description": "Same call, mints reversed: you give `{{buyUsdc}}` USDC and receive tokens.\n\n**Output:** `outAmount` = tokens, in TOKEN base units (÷ 10^8 for NVDAx).\n\n**What it means:** this is the **ask** — the price a buyer pays. `P_open` for a buy (δ = +1).\n\n**The Tests tab** computes the ask, then prints the spread between step 3's bid and this ask. That spread — about 0.09% when we ran it — is the pool's fee plus price impact: the cost of trading, and why nobody fills at the middle.\n\n**The rule:** you never choose bid or ask. Selling gets the bid. Buying pays the ask. The direction of the trade decides."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const usdc = Number(pm.variables.get('buyUsdc'));",
+              "const base = BigInt(Math.round(usdc * 10 ** Number(pm.variables.get('usdcDecimals')))).toString();",
+              "pm.collectionVariables.set('buyBaseUnits', base);",
+              "console.log('BUY with', usdc, 'USDC =', base, 'base units (× 10^6)');"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const q = pm.response.json();",
+              "pm.test('quote returned', () => pm.expect(q.outAmount).to.be.a('string'));",
+              "const tokDec = Number(pm.variables.get('tokenDecimals')), usdDec = Number(pm.variables.get('usdcDecimals'));",
+              "const usdc = Number(q.inAmount) / 10 ** usdDec;",
+              "const tokens = Number(q.outAmount) / 10 ** tokDec;",
+              "const ask = usdc / tokens;",
+              "console.log('you give', usdc, 'USDC → you receive', tokens, 'tokens');",
+              "console.log('ASK (effective buy price) $' + ask.toFixed(4), '| price impact', q.priceImpactPct + '%');",
+              "const bid = Number(pm.variables.get('bidPrice'));",
+              "if (bid) console.log('SPREAD: ask $' + ask.toFixed(4), '− bid $' + bid.toFixed(4), '= $' + (ask - bid).toFixed(4), '(' + ((ask / bid - 1) * 100).toFixed(3) + '%) — the cost of trading');",
+              "pm.collectionVariables.set('askPrice', ask.toFixed(6));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Build the transaction (unsigned — nothing moves)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "content-type", "value": "application/json" },
+          { "key": "accept", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"quoteResponse\": {{sellQuote}},\n  \"userPublicKey\": \"{{placeholderWallet}}\",\n  \"wrapAndUnwrapSol\": true\n}"
+        },
+        "url": { "raw": "{{jupLite}}/swap/v1/swap", "host": ["{{jupLite}}"], "path": ["swap", "v1", "swap"] },
+        "description": "**Input:** the quote from step 3 (saved by its Tests tab) and a wallet address. The address here is a placeholder — a public key only. No private key exists anywhere in this collection.\n\n**Output:** `swapTransaction` — a base64 string, the unsigned transaction. `lastValidBlockHeight` — the offer expires after this block (about a minute). `prioritizationFeeLamports` — the tip to validators. `simulationError` — Jupiter dry-ran it; `null` means it would succeed.\n\n**What it means:** this is the last read-only step. A real trader's wallet would decode this, sign it with the private key, and send it to a Solana node. **That signature is the point of no return, and Yagnum never takes it.** The engine simulates the token leg at the quoted price instead (docs/JUPITER-FLOW.md §7).\n\n**The trap:** thinking this call traded something. It formatted a request. Only a private key can turn it into a trade."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const b = pm.response.json();",
+              "pm.test('unsigned transaction built', () => pm.expect(b.swapTransaction).to.be.a('string'));",
+              "console.log('unsigned transaction:', b.swapTransaction.length, 'base64 chars (nobody signed it)');",
+              "console.log('valid until block', b.lastValidBlockHeight, '| priority fee', b.prioritizationFeeLamports, 'lamports', '| simulationError', b.simulationError);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. The on-chain record — latest swaps on the pool",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "content-type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"getSignaturesForAddress\",\n  \"params\": [\"{{poolAddress}}\", { \"limit\": 5 }]\n}"
+        },
+        "url": { "raw": "{{solanaRpc}}", "host": ["{{solanaRpc}}"] },
+        "description": "**Input:** the NVDAx/USDC pool's address (from GeckoTerminal; the deepest pool for this token).\n\n**Output:** the last 5 transactions that touched the pool: `signature` (the transaction's id), `slot` (Solana's clock tick), `blockTime` (unix seconds), `err` (null if it succeeded).\n\n**What it means:** every swap attempt, successful or failed, is written into a public ledger anyone can read. This is the audit trail the paper's Research Question 3 wants to use as proof of reconciliation.\n\n**Watch for:** `err: {InstructionError: [n, {Custom: 6000}]}` — a swap that the pool REJECTED because the price moved past the sender's slippage guard between quote and landing. Step 3's `otherAmountThreshold`, doing its job, in public.\n\nThe Tests tab saves the newest signature for step 7."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json().result || [];",
+              "pm.test('signatures returned', () => pm.expect(r.length).to.be.above(0));",
+              "r.forEach(s => console.log(new Date(s.blockTime * 1000).toISOString(), 'slot', s.slot, s.err ? 'FAILED ' + JSON.stringify(s.err) : 'ok', s.signature.slice(0, 16) + '…'));",
+              "const ok = r.find(s => !s.err) || r[0];",
+              "pm.collectionVariables.set('signature', ok.signature);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. One transaction in full",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "content-type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"getTransaction\",\n  \"params\": [\"{{signature}}\", { \"encoding\": \"jsonParsed\", \"maxSupportedTransactionVersion\": 0 }]\n}"
+        },
+        "url": { "raw": "{{solanaRpc}}", "host": ["{{solanaRpc}}"] },
+        "description": "**Input:** one signature from step 6.\n\n**Output:** the whole transaction: `meta.preTokenBalances` and `meta.postTokenBalances` (every account's token balance before and after — the swap is the difference), `meta.fee` (in lamports, 10^-9 SOL), `meta.err`, `meta.logMessages` (the program's own log, where a slippage failure names itself), `slot`, `blockTime`.\n\n**What it means:** the balances before and after ARE the trade. Read `uiTokenAmount.decimals` on each balance — the chain carries every token's decimals with every amount, which is where step 2's 6 and 8 ultimately come from.\n\nThe Tests tab prints the fee, the outcome, and each token balance change it can find."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const tx = pm.response.json().result;",
+              "pm.test('transaction found', () => pm.expect(tx).to.be.an('object'));",
+              "if (!tx) return;",
+              "const m = tx.meta || {};",
+              "console.log('slot', tx.slot, '| time', new Date(tx.blockTime * 1000).toISOString(), '| fee', m.fee, 'lamports =', (m.fee / 1e9) + ' SOL', '| err', JSON.stringify(m.err));",
+              "const pre = m.preTokenBalances || [], post = m.postTokenBalances || [];",
+              "post.forEach(p => {",
+              "  const before = pre.find(x => x.accountIndex === p.accountIndex);",
+              "  const b = before ? Number(before.uiTokenAmount.uiAmountString) : 0;",
+              "  const a = Number(p.uiTokenAmount.uiAmountString);",
+              "  if (a !== b) console.log('mint', p.mint.slice(0, 8) + '…', 'decimals', p.uiTokenAmount.decimals, 'balance', b, '→', a, '(Δ', (a - b).toFixed(p.uiTokenAmount.decimals) + ')');",
+              "});",
+              "(m.logMessages || []).filter(l => /error|slippage|Custom/i.test(l)).slice(0, 3).forEach(l => console.log('log:', l));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Yagnum's own view — GET /market/token/{symbol}",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "accept", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{clerkToken}}", "description": "Mint one with: uv run python scripts/dev_token.py (in app/api)." }
+        ],
+        "url": { "raw": "{{yagnumApi}}/market/token/NVDA", "host": ["{{yagnumApi}}"], "path": ["market", "token", "NVDA"] },
+        "description": "The one Jupiter call Yagnum's app makes today, wrapped in our own contract: the token (found as in step 1, cached), its price (step 2), Alpaca's last trade for the real share, whether the market is open, and the signed gap between token and share.\n\n**Money is strings** (ADR-010): `usd_price`, `market_price`, `liquidity_usd`, `gap_pct` all arrive as decimal text, never JSON numbers.\n\n404 `no_token` for a symbol with no xStock (try KO). Needs the API running on localhost:8000 and a dev token in `clerkToken`."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "  const b = pm.response.json();",
+              "  console.log(b.token, '$' + b.usd_price, '| share', b.symbol, '$' + b.market_price, '| market open', b.market_open, '| gap', b.gap_pct + '%');",
+              "  pm.test('money is strings', () => pm.expect(b.usd_price).to.be.a('string'));",
+              "} else console.log('status', pm.response.code, pm.response.text());"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
