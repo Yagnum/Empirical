@@ -28,13 +28,84 @@ So the reserve for one order is `(per-symbol size) × (shape multiplier)`. The
 question "is the multiplier per symbol?" is really two questions, and the
 answers differ. Section 5 returns to it.
 
-## 2. Where 2.326 came from
+## 2. Where 2.326 came from: the bell curve, from the ground up
 
-The paper took `z` from the **bell curve** (the normal distribution). On a
-bell curve, 99% of outcomes sit below 2.326 standard deviations. So "reserve
-2.326 σ and you are covered 99% of the time" is true **if weekend moves
-follow a bell curve**. That assumption was never tested. It is the kind of
-assumption a formula makes quietly.
+### The five-year-old version
+
+Measure the height of everyone in a school and draw a bar chart. Most
+people are near the middle. A few are very short or very tall. The chart
+looks like a bell. Nobody is three metres tall. The bell curve is a rule
+that says *how many* people you find at each distance from the middle, and
+it says "extremely far from the middle" almost never happens.
+
+Weekend stock moves are not like heights. They are like earthquakes. Most
+weekends the ground barely moves. Once in a while, it moves a lot — far
+more than "almost never". So a rule built for heights under-counts the big
+weekends.
+
+### What the bell curve actually is
+
+The bell curve is the **normal distribution**. It is a formula that gives
+the probability of each outcome, and it has exactly two inputs:
+
+- **μ (mu), the mean** — where the middle of the bell sits.
+- **σ (sigma), the standard deviation** — how wide the bell is.
+
+Its shape is fixed by a single equation:
+
+$$f(x) = \frac{1}{\sigma\sqrt{2\pi}} \; e^{-\frac{(x-\mu)^2}{2\sigma^2}}$$
+
+You do not need the equation to use it. You need one consequence: **once
+you know μ and σ, the curve tells you the share of outcomes in any range.**
+About 68% sit within 1 σ of the mean, 95% within 2 σ, 99.7% within 3 σ.
+These fractions are the same for heights, for test scores, for anything
+that is truly bell-shaped — that is the whole appeal.
+
+### What "measured from" means
+
+Two different things are measured, and it helps to keep them apart.
+
+**The curve's numbers, 2.326 included, are not measured from any data.**
+They are pure mathematics. Take a bell curve with μ = 0 and σ = 1 (the
+"standard normal"). Ask: below what value does 99% of the area sit? The
+answer is 2.326. This function — "give me a probability, I give you the
+cut-off" — is written Φ⁻¹ (the inverse of the cumulative distribution
+function), and 2.326 = Φ⁻¹(0.99). In code, `scipy.stats.norm.ppf(0.99)`.
+Other rows of the same table: 1.645 for 95%, 3.090 for 99.9%, and 2.576 if
+you want 99% *two-sided* (both tails together).
+
+**What is measured from data is whether our weekends fit that curve.** The
+procedure has three steps:
+
+1. Standardize every gap: `z_i = (r_i − μ) / σ`, where μ and σ come from
+   the 1,864 observed gaps themselves (μ is about 0, σ is 2.51%). This puts
+   every weekend on the "how many σ from the middle" scale. NVDA's −13.2%
+   weekend is 4.9 σ on its own scale.
+2. If the gaps were bell-shaped, then by the curve's rule exactly 1% of
+   these `z_i` values would lie below −2.326. Count how many actually do.
+3. Compare. We found 1.93%, not 1%.
+
+That count is the test. A bell curve fitted to our data — same μ, same σ —
+predicts a number of extreme weekends; the data contains almost twice as
+many. **Kurtosis** is the summary statistic for this: it is the average of
+`z_i⁴` minus 3, so it is dominated by the largest |z| values, and a bell
+curve scores exactly 0. Our 27 says the fourth power of the extremes is
+enormous relative to what the curve allows.
+
+### Why people assume a bell curve, and why it fails here
+
+There is a theorem (the central limit theorem) that says: add up many small,
+independent random effects and the total is bell-shaped, no matter what the
+individual effects look like. Heights are like that — thousands of genes
+and meals, each a small nudge. Many finance formulas lean on this theorem.
+
+A weekend gap is not the sum of many small nudges. It is usually nothing,
+plus occasionally one large lump: an earnings report, a tariff announced on
+Sunday night, a war. One lump is not "many independent small effects", so
+the theorem does not apply, and the tails come out fat. The paper inherited
+the bell-curve multiplier from that tradition. The data says the tradition
+does not hold for weekend gaps, which is exactly the kind of finding an
+empirical section exists to make.
 
 ## 3. The test, and why 2.326 fails it
 
@@ -168,3 +239,71 @@ Caveats the notebook states and this document repeats: 25 weekends per
 token is thin; the token sample (March to August 2026) contains no crash;
 seven tokens have only 7 or 8 weekends; the premarket settlement question
 waits for the sampler's own data and a full-market feed.
+
+## 8. Where the research data lives
+
+### The five-year-old version
+
+There is a spreadsheet in the cloud that never sleeps. A robot adds one row
+to it every five minutes, day and night, with the price of each token and
+each share. Another robot, run once, copied six months of old prices into
+it. The notebook is a report that reads the spreadsheet and draws the
+charts. The spreadsheet stays; the report can be re-run any time.
+
+### The actual layout
+
+**The database.** One Postgres database hosted by Neon (project
+`winter-surf-22863956`, branch `development`, region AWS us-east-2). It is
+the same database the app uses for its audit log and fills ledger; the
+research tables sit beside them. The connection string is `DATABASE_URL`
+in the repo-root `.env` (never committed) and, for the robot, a GitHub
+Actions secret of the same name. Postgres stores every price as `NUMERIC`,
+exact decimal digits — never a floating-point number (ADR-010).
+
+**Three tables, three writers.**
+
+| Table | One row is | Rows (2026-08-29) | Written by | Source |
+| --- | --- | --- | --- | --- |
+| `token_prices` | one token, one 5-minute moment: Jupiter price, Alpaca last trade, market open? | 4,960 and growing by 5,760 a day | `scripts/sample_prices.py`, run every 5 minutes by the GitHub Actions cron `.github/workflows/sample-prices.yml` | Jupiter Price API v3; Alpaca latest trades |
+| `token_candles` | one token, one hour (or day): open, high, low, close, volume | 57,861 | `scripts/backfill_history.py`, run once | GeckoTerminal OHLCV (free tier: last 180 days) |
+| `market_bars` | one share, one day or one minute: open, high, low, close, volume, trade count | 38,820 | same script, run once | Alpaca market data, IEX feed (2 years daily; Monday 04:00–10:30 ET minutes) |
+
+Each table is **append-only**: rows are added, never edited or deleted. The
+backfill uses `INSERT … ON CONFLICT DO NOTHING` on a natural key (symbol +
+timeframe + timestamp), so running it twice adds nothing — a property that
+saved the dataset when a run was interrupted.
+
+**The code that fills them** lives in `app/api/`: `jupiter.py` and
+`geckoterminal.py` (thin API clients that decode numbers as text),
+`alpaca.py` (`latest_trades`, `bars`), `sampler.py` (one snapshot),
+`backfill.py` (paging and upserts), and `models.py` (the table
+definitions; `alembic/versions/` holds the migrations that created them).
+
+**The notebook** is `notebooks/gap-volatility.ipynb`. It connects with the
+same `DATABASE_URL`, loads each table into a pandas DataFrame with
+`read_sql`, and does every calculation in memory. It writes nothing back.
+Its charts are saved to `notebooks/figures/*.png`, and the notebook file
+itself is committed *with its outputs*, so the numbers in this document can
+be checked on GitHub without running anything. To re-run it after new
+weekends arrive:
+
+```
+cd app/api
+uv run --group research jupyter nbconvert --to notebook --execute --inplace ../../notebooks/gap-volatility.ipynb
+```
+
+**The external sources and their limits**, because they shape what the
+notebook can and cannot say:
+
+- Jupiter's Price API is current-price only — no history. That is why the
+  sampler exists: nobody else keeps a five-minute weekend record.
+- GeckoTerminal's public tier serves the last 180 days of candles and about
+  30 calls a minute. Older token history costs money.
+- Alpaca's sandbox serves the IEX feed, which prints nothing before 08:00
+  ET. Earlier premarket needs a full-market (SIP) feed.
+- A pool only prints an hourly candle in hours with a trade, so thin tokens
+  have gaps; the notebook drops a weekend if the token's reference price is
+  more than 6 hours stale.
+
+**What is *not* stored anywhere**: no wallet, no private key, no swap. Every
+byte here is a price somebody else published, copied so it cannot vanish.
