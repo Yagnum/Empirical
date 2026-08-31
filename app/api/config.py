@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     database_url: str = ""
     database_url_unpooled: str = ""
 
+    # --- Environment ---
+    # "development" or "production". Two things hang on it (ADR-019): the
+    # dev-only weekend override (simulate a closed market on a weekday) and
+    # the /dev routes that flip it. In production both must not exist, so the
+    # guard lives in sessions.py and refuses anything but "development".
+    app_env: str = "development"
+
     # --- Misc ---
     jup_api_key: str = ""  # used in later crypto phases
     frontend_origin: str = "http://localhost:3000"

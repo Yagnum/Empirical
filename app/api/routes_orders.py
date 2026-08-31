@@ -69,6 +69,10 @@ class OrderRequest(BaseModel):
     type: Literal["market", "limit"]
     limit_price: Decimal | None = Field(default=None, gt=0)
     time_in_force: Literal["day", "gtc"] = "day"
+    # Ask for execution in the extended sessions too (premarket 4:00-9:30,
+    # after-hours 16:00-20:00 ET). Alpaca only allows it on a day limit
+    # order, so that pairing is enforced here rather than as a broker 422.
+    extended_hours: bool = False
 
     @field_validator("symbol")
     @classmethod
@@ -81,6 +85,8 @@ class OrderRequest(BaseModel):
             raise ValueError("limit_price is required for a limit order")
         if self.type == "market" and self.limit_price is not None:
             raise ValueError("limit_price is only valid for a limit order")
+        if self.extended_hours and (self.type != "limit" or self.time_in_force != "day"):
+            raise ValueError("extended_hours orders must be day limit orders")
         return self
 
     def to_alpaca(self) -> dict:
@@ -94,6 +100,8 @@ class OrderRequest(BaseModel):
         }
         if self.limit_price is not None:
             payload["limit_price"] = format(self.limit_price, "f")
+        if self.extended_hours:
+            payload["extended_hours"] = True
         return payload
 
 
@@ -128,6 +136,7 @@ def shape_order(order: dict) -> dict:
         "type": _text(order.get("type") or order.get("order_type")),
         "time_in_force": _text(order.get("time_in_force")),
         "status": _text(order.get("status")),
+        "extended_hours": bool(order.get("extended_hours")),
         "limit_price": _optional(order.get("limit_price")),
         "filled_avg_price": _optional(order.get("filled_avg_price")),
         "submitted_at": _text(order.get("submitted_at") or order.get("created_at")),

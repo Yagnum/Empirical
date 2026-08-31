@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 import alpaca
 import clerk_auth
+import sessions
 
 router = APIRouter(tags=["market"], dependencies=[Depends(clerk_auth.require_user_id)])
 
@@ -48,16 +49,23 @@ def clock() -> dict:
 
     The frontend needs this to say "your order will queue until 9:30 AM"
     instead of leaving the user wondering why nothing filled.
+
+    Under the dev weekend override (ADR-019) `is_open` is forced false and
+    `simulated` says so: the whole app then behaves as it will on a real
+    Saturday. Only this route's answer is faked - everything that records
+    data (the sampler) reads Alpaca's clock directly and never sees this.
     """
     try:
         data = alpaca.get_clock()
     except alpaca.AlpacaError as exc:
         raise alpaca.http_error(exc) from exc
+    simulated = sessions.weekend_override()
     return {
-        "is_open": bool(data.get("is_open")),
+        "is_open": False if simulated else bool(data.get("is_open")),
         "next_open": str(data.get("next_open") or ""),
         "next_close": str(data.get("next_close") or ""),
         "timestamp": str(data.get("timestamp") or ""),
+        "simulated": simulated,
     }
 
 

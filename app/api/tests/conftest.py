@@ -49,8 +49,20 @@ TEST_ACCOUNT_ID = "acct-test-0001"
 # Per-process so two pytest runs (or an -n auto worker) never share tables.
 TEST_SCHEMA = f"yagnum_test_{os.getpid()}"
 
-# Truncated between tests. Children first: the FKs point at `fills`.
-_TABLES = ["audit_log", "order_intents", "realized_pnl", "lots", "fills", "token_prices", "token_candles", "market_bars"]
+# Truncated between tests. Children first: the FKs point at `fills` and
+# `weekend_trades`.
+_TABLES = [
+    "audit_log",
+    "order_intents",
+    "realized_pnl",
+    "lots",
+    "fills",
+    "token_prices",
+    "token_candles",
+    "market_bars",
+    "weekend_trade_events",
+    "weekend_trades",
+]
 
 
 @pytest.fixture(autouse=True)

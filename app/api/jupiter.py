@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterable
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -132,6 +133,96 @@ def xstock_for(underlying: str) -> dict | None:
         if token["underlying"] == wanted:
             return token
     return None
+
+
+# ---------------------------------------------------------------------------
+# Executable prices: the swap quote (docs/JUPITER-FLOW.md §3-4, ADR-019)
+# ---------------------------------------------------------------------------
+#
+# price/v3 reports the LAST swap - what somebody else already paid. A trade
+# needs the price offered to *you*, *now*, for *your size*: that is the quote.
+# Direction is the bid/ask rule: quoting token->USDC prices a SELL (the bid),
+# USDC->token prices a BUY (the ask). Amounts travel in base units - integers
+# scaled by the token's declared decimals (USDC 6, most xStocks 8) - and the
+# quote never places a trade: building or signing a transaction is a different
+# endpoint this codebase does not call.
+
+QUOTE_URL = "https://api.jup.ag/swap/v1/quote"
+LITE_QUOTE_URL = "https://lite-api.jup.ag/swap/v1/quote"
+
+USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+USDC_DECIMALS = 6
+
+_TEN = Decimal(10)
+
+
+def to_base_units(amount: Decimal, decimals: int) -> int:
+    """3.5 tokens with 8 decimals -> 350_000_000. Exact or ValueError."""
+    scaled = amount * (_TEN**decimals)
+    if scaled != scaled.to_integral_value():
+        raise ValueError(f"{amount} does not fit in {decimals} decimals")
+    return int(scaled)
+
+
+def from_base_units(base_units: int | str, decimals: int) -> Decimal:
+    """350_000_000 base units with 8 decimals -> Decimal('3.5')."""
+    return Decimal(int(base_units)) / (_TEN**decimals)
+
+
+def swap_quote(input_mint: str, output_mint: str, amount_base_units: int) -> dict:
+    """GET swap/v1/quote - what `amount_base_units` of the input buys right now.
+
+    Returns Jupiter's body: `outAmount` (base units of the output, a string),
+    `priceImpactPct`, `routePlan`, and more. Read-only.
+    """
+    url = QUOTE_URL if settings.jup_api_key else LITE_QUOTE_URL
+    return _get(
+        url,
+        {
+            "inputMint": input_mint,
+            "outputMint": output_mint,
+            "amount": str(amount_base_units),
+            "slippageBps": "50",
+        },
+    )
+
+
+def executable_price(token: dict, side: str, qty: Decimal) -> dict:
+    """The effective USD price for trading `qty` of this xStock now.
+
+    side "sell": quote qty tokens -> USDC. The USDC out per token is the bid.
+    side "buy":  quote USDC -> tokens for roughly the right notional (sized
+    from the last-swap price) and read USDC in per token out - the ask. The
+    buy leg prices the trade; it does not promise that exact token amount.
+
+    Returns {"price", "usd_amount", "token_amount", "price_impact_pct"};
+    price = usd_amount / token_amount, all Decimal.
+    """
+    decimals = int(token["decimals"])
+    mint = str(token["mint"])
+
+    if side == "sell":
+        body = swap_quote(mint, USDC_MINT, to_base_units(qty, decimals))
+        usd = from_base_units(str(body["outAmount"]), USDC_DECIMALS)
+        tokens = qty
+    else:
+        last = prices([mint]).get(mint) or {}
+        approx = Decimal(str(last.get("usdPrice") or "0"))
+        if approx <= 0:
+            raise JupiterError("no last-swap price to size the buy quote from")
+        notional = (qty * approx).quantize(Decimal("0.000001"))
+        body = swap_quote(USDC_MINT, mint, to_base_units(notional, USDC_DECIMALS))
+        usd = notional
+        tokens = from_base_units(str(body["outAmount"]), decimals)
+
+    if tokens <= 0 or usd <= 0:
+        raise JupiterError("quote came back with a zero amount")
+    return {
+        "price": usd / tokens,
+        "usd_amount": usd,
+        "token_amount": tokens,
+        "price_impact_pct": str(body.get("priceImpactPct") or "0"),
+    }
 
 
 def prices(mints: Iterable[str]) -> dict[str, dict]:

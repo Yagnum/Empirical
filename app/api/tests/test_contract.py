@@ -186,6 +186,8 @@ def test_clock(client, monkeypatch):
         "next_open": "2026-08-27T09:30:00-04:00",
         "next_close": "2026-08-27T16:00:00-04:00",
         "timestamp": "2026-08-26T16:09:31.278659289-04:00",
+        # ADR-019: true only under the dev weekend override.
+        "simulated": False,
     }
 
 
@@ -286,6 +288,7 @@ def test_place_limit_order(client, monkeypatch):
         "type": "limit",
         "time_in_force": "day",
         "status": "accepted",
+        "extended_hours": False,
         "limit_price": "1",
         "filled_avg_price": None,
         "submitted_at": "2026-08-26T20:18:18.608642739Z",

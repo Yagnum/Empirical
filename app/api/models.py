@@ -230,6 +230,111 @@ class RealizedPnl(Base):
     occurred_at: Mapped[dt.datetime] = mapped_column(TZ, nullable=False)
 
 
+class WeekendTrade(Base):
+    """One trade through the ERR engine: opened while no market is open,
+    settled at the first regulated execution (ADR-017, ADR-019).
+
+    This is the state machine of the paper's §6, one row per trade:
+
+        provisional           opened. Jupiter's quote is `p_open`, the reserve
+                              is journaled to escrow, a sell is advanced
+                              `qty * p_open` immediately (that advance IS the
+                              product: cash now instead of Monday).
+        awaiting_settlement   the weekend is over and the hedge order is
+                              working at the broker (`hedge_order_id`).
+        settled               the hedge filled at `p_close`; the true-up ran;
+                              the trader ended at the regulated price and the
+                              escrow came back plus or minus the gap.
+        breached              the gap ate more than the whole reserve; the
+                              excess was debited (escrow is collateral, not a
+                              cap - ADR-017).
+
+    `simulated` marks trades opened under the dev weekend override, so a row
+    from the simulator can never be mistaken for a real weekend later.
+    `settlement_mode` records how it closed: "market" (a real broker fill) or
+    "injected" (dev only - a chosen gap, no order; the way to watch the
+    reserve absorb a Monday we would otherwise wait months for).
+
+    Money columns are the trade's arithmetic, frozen at the moment it ran;
+    the journals themselves live at Alpaca under the ids kept here. The
+    per-step story is in `weekend_trade_events`.
+    """
+
+    __tablename__ = "weekend_trades"
+    __table_args__ = (
+        CheckConstraint("side in ('buy','sell')", name="side"),
+        CheckConstraint(
+            "state in ('provisional','awaiting_settlement','settled','breached')",
+            name="state",
+        ),
+        Index("ix_weekend_trades_account_created", "alpaca_account_id", "created_at"),
+        Index("ix_weekend_trades_state", "state"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    clerk_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    alpaca_account_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)  # NVDA
+    token_symbol: Mapped[str] = mapped_column(String(16), nullable=False)  # NVDAx
+    mint: Mapped[str] = mapped_column(String(64), nullable=False)
+    side: Mapped[str] = mapped_column(String(4), nullable=False)
+    qty: Mapped[Decimal] = mapped_column(QTY, nullable=False)
+    # The Jupiter executable quote the trade opened at (bid for sells, ask
+    # for buys), and the reserve inputs exactly as used (ADR-018).
+    p_open: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    sigma: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    z: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    reserve: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    fees: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="provisional")
+    simulated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Alpaca journal ids: the escrow in, the sell-side advance out.
+    escrow_journal_id: Mapped[str | None] = mapped_column(String(64))
+    advance_journal_id: Mapped[str | None] = mapped_column(String(64))
+    # Settlement.
+    settlement_mode: Mapped[str | None] = mapped_column(String(16))
+    injected_gap: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
+    hedge_order_id: Mapped[str | None] = mapped_column(String(64))
+    p_close: Mapped[Decimal | None] = mapped_column(MONEY)
+    # What the true-up moved for the trader: p_close vs p_open, signed from
+    # the trader's side. Positive means the trader got money back on top of
+    # the escrow; negative means the escrow (then the account) covered it.
+    true_up: Mapped[Decimal | None] = mapped_column(MONEY)
+    escrow_returned: Mapped[Decimal | None] = mapped_column(MONEY)
+    shortfall: Mapped[Decimal | None] = mapped_column(MONEY)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        TZ, nullable=False, server_default=func.now(), index=True
+    )
+    settled_at: Mapped[dt.datetime | None] = mapped_column(TZ)
+
+
+class WeekendTradeEvent(Base):
+    """Everything that happened to one weekend trade, in order. Append-only.
+
+    One row per step - opened, escrow_reserved, advance_paid, hedge_placed,
+    hedge_filled, escrow_released, shortfall_debited, breached - with the
+    amount it moved and the Alpaca id (journal or order) that proves it.
+    The double-entry ledger of ADR-019 in its simplest honest form: the
+    trade row says where things stand, this table says how they got there.
+    """
+
+    __tablename__ = "weekend_trade_events"
+    __table_args__ = (
+        Index("ix_weekend_trade_events_trade_at", "trade_id", "at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    trade_id: Mapped[int] = mapped_column(
+        ForeignKey("weekend_trades.id", ondelete="RESTRICT"), nullable=False
+    )
+    at: Mapped[dt.datetime] = mapped_column(TZ, nullable=False, server_default=func.now())
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    amount: Mapped[Decimal | None] = mapped_column(MONEY)
+    # The Alpaca journal or order id behind this step, when there is one.
+    alpaca_ref: Mapped[str | None] = mapped_column(String(64))
+    detail: Mapped[str | None] = mapped_column(Text)
+
+
 class TokenPrice(Base):
     """One observation: a tokenized stock's Jupiter price beside its real share.
 

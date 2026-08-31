@@ -22,6 +22,10 @@ Layout (deliberately flat — a few small modules, easy to read end to end):
     routes_activity.py   GET /activities, /activities/export.csv, /documents
     routes_pnl.py        GET /pnl/realized
     routes_webhooks.py   POST /webhooks/clerk
+    sessions.py          which trading window is it (+ the dev weekend override)
+    err.py               reserve sizing from the measured sigma and z (ADR-018)
+    weekend.py           the ERR engine: open, escrow, hedge, true-up (ADR-019)
+    routes_weekend.py    /weekend/* and the dev-only /dev/clock
 
 Explore it at http://localhost:8000/docs. Everything except /health and
 /webhooks/clerk (which authenticates by Svix signature, not session) needs a
@@ -42,6 +46,7 @@ import routes_orders
 import routes_pnl
 import routes_portfolio
 import routes_webhooks
+import routes_weekend
 from config import settings
 
 app = FastAPI(
@@ -94,6 +99,7 @@ app.include_router(routes_portfolio.router)
 app.include_router(routes_activity.router)
 app.include_router(routes_pnl.router)
 app.include_router(routes_webhooks.router)
+app.include_router(routes_weekend.router)
 
 
 @app.get("/health", tags=["health"])

@@ -358,24 +358,34 @@ def create_transfer(account_id: str, relationship_id: str, amount: Decimal) -> d
     )
 
 
-def create_journal(from_account: str, to_account: str, amount: Decimal) -> dict:
+def create_journal(
+    from_account: str,
+    to_account: str,
+    amount: Decimal,
+    *,
+    description: str | None = None,
+) -> dict:
     """POST /v1/journals — move cash between two accounts (entry type JNLC).
 
     Funding via a journal from the firm account credits instantly and has no
     daily limit. ACH transfers, by contrast, are capped at 1 per direction per
     trading day and crawl through a simulated clearing pipeline in sandbox —
     we learned both the hard way (ADR-011).
+
+    `description` is Alpaca's free-text label on the journal. The ERR engine
+    (ADR-019) tags every escrow movement with it, which is what makes
+    Invariant 1 — "escrow covers every open weekend trade" — a query over
+    the broker's own records instead of a promise.
     """
-    return _request(
-        "POST",
-        "/v1/journals",
-        json={
-            "from_account": from_account,
-            "to_account": to_account,
-            "entry_type": "JNLC",
-            "amount": format(amount, "f"),
-        },
-    )
+    payload = {
+        "from_account": from_account,
+        "to_account": to_account,
+        "entry_type": "JNLC",
+        "amount": format(amount, "f"),
+    }
+    if description:
+        payload["description"] = description[:200]
+    return _request("POST", "/v1/journals", json=payload)
 
 
 def fund_account(account_id: str, amount: Decimal, account_owner_name: str) -> dict:
