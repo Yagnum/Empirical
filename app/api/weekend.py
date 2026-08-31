@@ -254,7 +254,7 @@ def open_trade(
         to_account=firm,
         amount=sizing["reserve"],
         kind="escrow_reserved",
-        description=f"ERR escrow · {tag}",
+        description=f"ERR escrow - {tag}",
     )
 
     if side == "sell":
@@ -266,7 +266,7 @@ def open_trade(
             to_account=account_id,
             amount=notional,
             kind="advance_paid",
-            description=f"ERR advance ({_fmt(qty)} {trade.symbol} @ {_fmt(_money(p_open))}) · {tag}",
+            description=f"ERR advance ({_fmt(qty)} {trade.symbol} @ {_fmt(_money(p_open))}) - {tag}",
         )
     else:
         # The mirror: bought now means paid-for now.
@@ -277,7 +277,7 @@ def open_trade(
             to_account=firm,
             amount=notional,
             kind="charge_paid",
-            description=f"ERR purchase charge ({_fmt(qty)} {trade.symbol} @ {_fmt(_money(p_open))}) · {tag}",
+            description=f"ERR purchase charge ({_fmt(qty)} {trade.symbol} @ {_fmt(_money(p_open))}) - {tag}",
         )
     session.commit()
     return trade
@@ -321,7 +321,7 @@ def _reconcile(session: Session, trade: WeekendTrade, *, sweep: bool) -> Weekend
                 to_account=firm,
                 amount=fill_value,
                 kind="hedge_swept",
-                description=f"ERR hedge proceeds swept · {tag}",
+                description=f"ERR hedge proceeds swept - {tag}",
             )
         else:
             # The real purchase came out of the trader's cash; the firm
@@ -333,7 +333,7 @@ def _reconcile(session: Session, trade: WeekendTrade, *, sweep: bool) -> Weekend
                 to_account=trade.alpaca_account_id,
                 amount=fill_value,
                 kind="hedge_swept",
-                description=f"ERR hedge purchase reimbursed · {tag}",
+                description=f"ERR hedge purchase reimbursed - {tag}",
             )
 
     true_up = trade.true_up if trade.true_up is not None else _true_up(trade, p_close)
@@ -349,7 +349,7 @@ def _reconcile(session: Session, trade: WeekendTrade, *, sweep: bool) -> Weekend
                 to_account=trade.alpaca_account_id,
                 amount=released,
                 kind="escrow_released",
-                description=f"ERR escrow released with true-up · {tag}",
+                description=f"ERR escrow released with true-up - {tag}",
             )
         trade.escrow_returned = _money(released)
         trade.shortfall = None
@@ -364,7 +364,7 @@ def _reconcile(session: Session, trade: WeekendTrade, *, sweep: bool) -> Weekend
                 to_account=firm,
                 amount=shortfall,
                 kind="shortfall_debited",
-                description=f"ERR shortfall beyond escrow · {tag}",
+                description=f"ERR shortfall beyond escrow - {tag}",
             )
         trade.escrow_returned = Decimal("0")
         trade.shortfall = _money(shortfall)

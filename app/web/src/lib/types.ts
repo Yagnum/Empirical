@@ -55,6 +55,97 @@ export type MarketClock = {
   next_open: string;
   next_close: string;
   timestamp: string;
+  /** True while the dev weekend override fakes a closed market (ADR-019). */
+  simulated?: boolean;
+};
+
+/* ------------------------------------------------------------- weekend --- */
+
+/**
+ * Which trading window the app is in (GET /weekend/session, ADR-019).
+ *
+ * `session` is what the app acts on; `scheduled` is what the calendar says.
+ * They differ only under the dev override, and `simulated` says so.
+ * `dev_toggle` is whether the simulator switch may exist at all — true only
+ * when the API runs in development.
+ */
+export type WeekendSession = {
+  session: "premarket" | "regular" | "afterhours" | "overnight" | "weekend";
+  scheduled: string;
+  simulated: boolean;
+  weekend_trading: boolean;
+  dev_toggle: boolean;
+};
+
+/**
+ * What a weekend trade would cost (GET /weekend/preview).
+ *
+ * `p_open` is Jupiter's executable quote for this exact size and direction —
+ * the bid for sells, the ask for buys — not the last-swap price. The reserve
+ * fields are the measured inputs of ADR-018, sent so the ticket can show its
+ * arithmetic. Money is strings, as everywhere.
+ */
+export type WeekendPreview = {
+  symbol: string;
+  token_symbol: string;
+  side: OrderSide;
+  qty: string;
+  p_open: string;
+  notional: string;
+  price_impact_pct: string;
+  sigma: string;
+  sigma_source: "measured" | "pooled_fallback";
+  z: string;
+  fees: string;
+  reserve: string;
+  reserve_pct: string;
+  params_generated_at: string;
+  session: Pick<WeekendSession, "session" | "scheduled" | "simulated">;
+};
+
+export type WeekendTradeState =
+  | "provisional"
+  | "awaiting_settlement"
+  | "settled"
+  | "breached";
+
+export type WeekendTradeEvent = {
+  at: string | null;
+  kind: string;
+  amount: string | null;
+  alpaca_ref: string | null;
+  detail: string | null;
+};
+
+/**
+ * One trade through the ERR engine (ADR-019). Opened while no market is
+ * open; settled at the first regulated execution. `simulated` marks trades
+ * placed under the dev override; `events` rides along on the detail and
+ * settle responses only.
+ */
+export type WeekendTrade = {
+  id: number;
+  symbol: string;
+  token_symbol: string;
+  side: OrderSide;
+  qty: string;
+  p_open: string;
+  sigma: string;
+  z: string;
+  reserve: string;
+  fees: string;
+  state: WeekendTradeState;
+  simulated: boolean;
+  settlement_mode: "market" | "injected" | null;
+  injected_gap: string | null;
+  hedge_order_id: string | null;
+  p_close: string | null;
+  true_up: string | null;
+  escrow_returned: string | null;
+  shortfall: string | null;
+  created_at: string | null;
+  settled_at: string | null;
+  events?: WeekendTradeEvent[];
 };
 
 export type Asset = {
@@ -127,6 +218,8 @@ export type Order = {
   type: OrderType;
   time_in_force: TimeInForce;
   status: string;
+  /** The order may also execute in the extended sessions (4-9:30 AM, 4-8 PM ET). */
+  extended_hours: boolean;
   limit_price: string | null;
   filled_avg_price: string | null;
   submitted_at: string;
@@ -141,6 +234,8 @@ export type NewOrder = {
   type: OrderType;
   limit_price?: string;
   time_in_force: TimeInForce;
+  /** Only valid on a day limit order — the API enforces the pairing too. */
+  extended_hours?: boolean;
 };
 
 export type Position = {

@@ -39,7 +39,21 @@ export function MarketStatus({
     );
   }
 
-  const { is_open, next_open, next_close } = clock.data;
+  const { is_open, next_open, next_close, simulated } = clock.data;
+
+  // The dev clock is faking a weekend (ADR-019): say so instead of quoting
+  // a next-open time that the simulation is deliberately ignoring.
+  if (simulated) {
+    return (
+      <p className={`flex items-center gap-2 text-[13px] text-ink-soft ${className}`}>
+        <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-stamp" />
+        <span>
+          <span className="font-medium text-ink">Simulated weekend</span>
+          <span className="text-ink-faint"> · dev clock — the real market is ignored</span>
+        </span>
+      </p>
+    );
+  }
 
   return (
     <p className={`flex items-center gap-2 text-[13px] text-ink-soft ${className}`}>

@@ -4,12 +4,16 @@ import type {
   Bar,
   MarketClock,
   Order,
+  OrderSide,
   PnlPreview,
   PortfolioHistory,
   Position,
   Quote,
   RealizedPl,
   TokenPrice,
+  WeekendPreview,
+  WeekendSession,
+  WeekendTrade,
 } from "@/lib/types";
 
 /*
@@ -149,6 +153,23 @@ export const fetchPnlPreview = (
   signal?: AbortSignal,
 ) => get<PnlPreview>("pnl/preview", { symbol, qty }, signal);
 
+/* ------------------------------------------------------------- weekend --- */
+
+/** Which trading window the app is in, dev override included (ADR-019). */
+export const fetchWeekendSession = (signal?: AbortSignal) =>
+  get<WeekendSession>("weekend/session", {}, signal);
+
+/** Jupiter's executable price and the reserve for a draft weekend trade. */
+export const fetchWeekendPreview = (
+  symbol: string,
+  side: OrderSide,
+  qty: string,
+  signal?: AbortSignal,
+) => get<WeekendPreview>("weekend/preview", { symbol, side, qty }, signal);
+
+export const fetchWeekendTrades = (signal?: AbortSignal) =>
+  get<WeekendTrade[]>("weekend/orders", {}, signal);
+
 /** The API's own word for "there is no ledger behind me right now". */
 export const LEDGER_UNAVAILABLE = "ledger_unavailable";
 
@@ -183,6 +204,10 @@ export const keys = {
     ["realized", after, until] as const,
   pnlPreview: (symbol: string, qty: string) =>
     ["pnl-preview", symbol, qty] as const,
+  weekendSession: ["weekend-session"] as const,
+  weekendPreview: (symbol: string, side: string, qty: string) =>
+    ["weekend-preview", symbol, side, qty] as const,
+  weekendTrades: ["weekend-trades"] as const,
 };
 
 /*
@@ -203,6 +228,16 @@ export const TOKEN_INTERVAL_CLOSED = 60_000;
 export const CLOCK_INTERVAL = 60_000;
 /** While a reset is liquidating: how often to ask whether the account is flat. */
 export const RESET_POLL_INTERVAL = 10_000;
+/*
+  The weekend ticket's preview is an executable quote for an exact size, so it
+  goes stale the way any quote does — but Jupiter's off-hours prices move
+  slowly and the sampler proves it, so fifteen seconds is honest and polite.
+  Trades poll like orders do: something on the page is usually mid-settlement
+  when anyone is watching the list.
+*/
+export const WEEKEND_PREVIEW_INTERVAL = 15_000;
+export const WEEKEND_TRADES_INTERVAL = 10_000;
+export const WEEKEND_SESSION_INTERVAL = 60_000;
 /*
   A sell's cost basis moves only when a trade fills, never on a timer, so the
   preview is held fresh for minutes and invalidated when an order is placed.

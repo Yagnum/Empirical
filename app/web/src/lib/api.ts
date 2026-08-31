@@ -35,6 +35,7 @@ import type {
   MarketClock,
   NewOrder,
   Order,
+  OrderSide,
   PortfolioHistory,
   Position,
   ProvisionedAccount,
@@ -43,6 +44,8 @@ import type {
   StatementDocument,
   TokenPrice,
   Transfer,
+  WeekendSession,
+  WeekendTrade,
 } from "@/lib/types";
 
 /* -------------------------------------------------------------- request -- */
@@ -254,6 +257,59 @@ export function cancelOrder(
     "/orders/" + encodeURIComponent(id),
     { method: "DELETE" },
   );
+}
+
+/* ------------------------------------------------------------- weekend --- */
+
+/** Which trading window the app is in (ADR-019), dev override included. */
+export function getWeekendSession(): Promise<ApiResult<WeekendSession>> {
+  return request<WeekendSession>("/weekend/session");
+}
+
+export function getWeekendTrades(): Promise<ApiResult<WeekendTrade[]>> {
+  return request<WeekendTrade[]>("/weekend/orders");
+}
+
+/**
+ * Opens a weekend trade: Jupiter's quote becomes `p_open`, the reserve is
+ * journaled to escrow, a sell is advanced its notional. Only accepted while
+ * the effective session is "weekend" (409 `market_is_open` otherwise).
+ */
+export function placeWeekendOrder(order: {
+  symbol: string;
+  side: OrderSide;
+  qty: string;
+}): Promise<ApiResult<WeekendTrade>> {
+  return request<WeekendTrade>("/weekend/orders", {
+    method: "POST",
+    body: order,
+  });
+}
+
+/**
+ * Advances one weekend trade toward settled. Safe to call repeatedly.
+ * mode "market" places (or checks on) the real hedge; "injected" is the
+ * dev-only chosen gap, and needs `gap` as a fraction ("-0.05").
+ */
+export function settleWeekendOrder(
+  id: number,
+  mode: "market" | "injected",
+  gap?: string,
+): Promise<ApiResult<WeekendTrade>> {
+  return request<WeekendTrade>(`/weekend/orders/${id}/settle`, {
+    method: "POST",
+    body: gap === undefined ? { mode } : { mode, gap },
+  });
+}
+
+/** Development only: flip the simulated-weekend clock (404 in production). */
+export function setDevClock(
+  simulateWeekend: boolean,
+): Promise<ApiResult<WeekendSession>> {
+  return request<WeekendSession>("/dev/clock", {
+    method: "POST",
+    body: { simulate_weekend: simulateWeekend },
+  });
 }
 
 /* ----------------------------------------------------------- portfolio --- */

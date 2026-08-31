@@ -7,9 +7,15 @@ import {
   cancelOrder,
   fundAccount,
   placeOrder,
+  placeWeekendOrder,
   resetAccount,
+  setDevClock,
+  settleWeekendOrder,
   type ApiFailure,
   type Order,
+  type OrderSide,
+  type WeekendSession,
+  type WeekendTrade,
 } from "@/lib/api";
 import { checkAmount } from "@/lib/money";
 import {
@@ -186,6 +192,7 @@ export async function submitOrder(
     timeInForce: String(
       formData.get("time_in_force") ?? "",
     ) as OrderDraft["timeInForce"],
+    extendedHours: String(formData.get("extended_hours") ?? "") === "true",
   };
 
   const check = checkOrderDraft(draft);
@@ -262,6 +269,163 @@ export async function requestCancel(
   revalidatePath("/orders");
   revalidatePath("/dashboard");
   return { status: "canceled", id: result.data.id };
+}
+
+/* -------------------------------------------------------------- weekend -- */
+
+export type WeekendOrderState =
+  | { status: "idle" }
+  | { status: "error"; message: string }
+  | { status: "placed"; trade: WeekendTrade };
+
+/**
+ * Opens a weekend trade through the ERR engine (ADR-019). The API is the
+ * final validator — it re-prices on Jupiter, checks shares or cash, and
+ * refuses outside the weekend session — so this only screens the obvious.
+ */
+export async function submitWeekendOrder(
+  _previous: WeekendOrderState,
+  formData: FormData,
+): Promise<WeekendOrderState> {
+  const { userId } = await auth();
+  if (!userId) {
+    return { status: "error", message: "Your session expired. Sign in again." };
+  }
+
+  const symbol = String(formData.get("symbol") ?? "").trim().toUpperCase();
+  const side = String(formData.get("side") ?? "") as OrderSide;
+  const qty = String(formData.get("qty") ?? "").trim();
+
+  if (!/^[A-Z.]{1,10}$/.test(symbol)) {
+    return { status: "error", message: "Choose a symbol to trade." };
+  }
+  if (side !== "buy" && side !== "sell") {
+    return { status: "error", message: "Choose buy or sell." };
+  }
+  if (!/^\d{1,4}$/.test(qty) || Number(qty) < 1) {
+    return {
+      status: "error",
+      message: "Weekend trades are whole shares, 1 to 1,000.",
+    };
+  }
+
+  const result = await placeWeekendOrder({ symbol, side, qty });
+  if (!result.ok) {
+    if (result.detail?.startsWith("market_is_open")) {
+      return {
+        status: "error",
+        message:
+          "The market is open, so this is a normal order — use the regular ticket.",
+      };
+    }
+    if (result.detail?.startsWith("insufficient_shares")) {
+      return { status: "error", message: "You don't hold that many shares to sell." };
+    }
+    if (result.detail?.startsWith("insufficient_cash")) {
+      return {
+        status: "error",
+        message: "Not enough cash for the purchase plus its reserve.",
+      };
+    }
+    if (result.detail === "no_token") {
+      return {
+        status: "error",
+        message: `${symbol} has no token that trades on weekends.`,
+      };
+    }
+    return { status: "error", message: describe(result.failure) };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/orders");
+  return { status: "placed", trade: result.data };
+}
+
+export type SettleTradeState =
+  | { status: "idle" }
+  | { status: "error"; message: string }
+  | { status: "done"; trade: WeekendTrade };
+
+/**
+ * Advances one weekend trade toward settled — the real hedge, or the
+ * dev-only injected gap. Idempotent on the API side, so re-clicking is safe.
+ */
+export async function settleWeekendTrade(
+  _previous: SettleTradeState,
+  formData: FormData,
+): Promise<SettleTradeState> {
+  const { userId } = await auth();
+  if (!userId) {
+    return { status: "error", message: "Your session expired. Sign in again." };
+  }
+
+  const id = Number(formData.get("id") ?? "");
+  const mode = String(formData.get("mode") ?? "market");
+  const gapRaw = String(formData.get("gap") ?? "").trim();
+
+  if (!Number.isInteger(id) || id < 1) {
+    return { status: "error", message: "That trade could not be identified." };
+  }
+  if (mode !== "market" && mode !== "injected") {
+    return { status: "error", message: "Choose how to settle." };
+  }
+  let gap: string | undefined;
+  if (mode === "injected") {
+    // The form takes percent ("-5"); the API takes a fraction ("-0.05").
+    const percent = Number(gapRaw);
+    if (gapRaw === "" || !Number.isFinite(percent) || Math.abs(percent) > 90) {
+      return {
+        status: "error",
+        message: "Enter a gap between -90 and 90 percent.",
+      };
+    }
+    gap = String(percent / 100);
+  }
+
+  const result = await settleWeekendOrder(id, mode, gap);
+  if (!result.ok) {
+    if (result.detail?.startsWith("market_closed")) {
+      return {
+        status: "error",
+        message:
+          "No regulated session is open to settle into. Wait for one, or inject a gap.",
+      };
+    }
+    if (result.failure === "conflict") {
+      return { status: "error", message: "This trade has already settled." };
+    }
+    return { status: "error", message: describe(result.failure) };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/orders");
+  return { status: "done", trade: result.data };
+}
+
+export type DevClockState =
+  | { status: "idle" }
+  | { status: "error"; message: string }
+  | { status: "set"; session: WeekendSession };
+
+/** Development only: flip the simulated-weekend clock. */
+export async function setSimulatedWeekend(
+  _previous: DevClockState,
+  formData: FormData,
+): Promise<DevClockState> {
+  const { userId } = await auth();
+  if (!userId) {
+    return { status: "error", message: "Your session expired. Sign in again." };
+  }
+
+  const simulate = String(formData.get("simulate") ?? "") === "true";
+  const result = await setDevClock(simulate);
+  if (!result.ok) {
+    return { status: "error", message: describe(result.failure) };
+  }
+  // The whole app keys off the clock; make server renders agree at once.
+  revalidatePath("/dashboard");
+  revalidatePath("/orders");
+  return { status: "set", session: result.data };
 }
 
 /** Strips our API's prefix so the trader reads the broker's own words. */

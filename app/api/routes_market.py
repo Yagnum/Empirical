@@ -264,6 +264,11 @@ def token_price(symbol: str = Path(..., min_length=1, max_length=16)) -> dict:
         raise HTTPException(status_code=502, detail="jupiter_unreachable: no price for the token")
 
     trades, market_open = sampler.market_side([underlying])
+    # The dev weekend override fakes the whole app's clock (ADR-019); this
+    # route is part of the app, so its market_open joins the simulation. The
+    # sampler itself calls market_side directly and never sees this.
+    if sessions.weekend_override():
+        market_open = False
     trade = trades.get(underlying) or {}
     market_price = sampler._decimal(trade.get("p"))
     traded_at = sampler._moment(trade.get("t"))

@@ -16,6 +16,8 @@ export type OrderDraft = {
   type: OrderType;
   limitPrice: string;
   timeInForce: TimeInForce;
+  /** Ask for the extended sessions too. Day limit orders only. */
+  extendedHours?: boolean;
 };
 
 export type OrderCheck =
@@ -80,6 +82,19 @@ export function checkOrderDraft(draft: OrderDraft): OrderCheck {
     }
     // Sub-penny prices are rejected by the exchange, not by us.
     order.limit_price = String(Math.round(limit * 100) / 100);
+  }
+
+  if (draft.extendedHours) {
+    // The broker's rule, enforced where the button is: extended-hours
+    // execution exists only for day limit orders.
+    if (draft.type !== "limit" || draft.timeInForce !== "day") {
+      return {
+        valid: false,
+        message: "Extended-hours orders must be limit orders for the day.",
+        field: "extendedHours",
+      };
+    }
+    order.extended_hours = true;
   }
 
   return { valid: true, order };

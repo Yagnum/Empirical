@@ -44,6 +44,10 @@ const ALLOWED: RegExp[] = [
   /^documents\/[A-Za-z0-9-]{1,64}\/download$/,
   /^pnl\/realized$/,
   /^pnl\/preview$/,
+  /^weekend\/session$/,
+  /^weekend\/preview$/,
+  /^weekend\/orders$/,
+  /^weekend\/orders\/\d{1,18}$/,
 ];
 
 // Headers worth carrying back. Everything else (upstream auth, cookies, CORS)

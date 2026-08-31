@@ -11,12 +11,17 @@ import { PriceChart } from "@/components/price-chart";
 import { QuotePanel } from "@/components/quote-panel";
 import { SymbolSearch } from "@/components/symbol-search";
 import { TokenPricePanel } from "@/components/token-price-panel";
+import { WeekendSwitch } from "@/components/weekend-switch";
+import { WeekendTicket } from "@/components/weekend-ticket";
+import { WeekendTradesPanel } from "@/components/weekend-trades";
 import {
   getAccount,
   getBars,
   getClock,
   getQuote,
   getTokenPrice,
+  getWeekendSession,
+  getWeekendTrades,
   searchAssets,
 } from "@/lib/api";
 import { priceRange } from "@/lib/chart";
@@ -40,16 +45,19 @@ export default async function SymbolPage({
 
   const day = priceRange("1D");
 
-  // Six independent requests, all started at once. The page is only as slow
+  // Eight independent requests, all started at once. The page is only as slow
   // as the slowest of them, not the sum.
-  const [account, quote, bars, clock, assets, token] = await Promise.all([
-    getAccount(),
-    getQuote(symbol),
-    getBars(symbol, day.timeframe, day.limit),
-    getClock(),
-    searchAssets(symbol, 1),
-    getTokenPrice(symbol),
-  ]);
+  const [account, quote, bars, clock, assets, token, weekendSession, weekendTrades] =
+    await Promise.all([
+      getAccount(),
+      getQuote(symbol),
+      getBars(symbol, day.timeframe, day.limit),
+      getClock(),
+      searchAssets(symbol, 1),
+      getTokenPrice(symbol),
+      getWeekendSession(),
+      getWeekendTrades(),
+    ]);
 
   if (!account.ok && account.failure === "no_account") {
     redirect("/onboarding");
@@ -78,6 +86,17 @@ export default async function SymbolPage({
   const asset = assets.ok ? assets.data.find((a) => a.symbol === symbol) : null;
   const initialClock = clock.ok ? clock.data : undefined;
   const initialQuote = quote.ok ? quote.data : undefined;
+  /*
+    The session decides which ticket this page carries (ADR-019): during any
+    regulated window it is the regular Alpaca ticket; during the weekend —
+    real or simulated by the dev clock — orders become weekend trades through
+    the ERR engine, so the weekend ticket takes the column. When the session
+    call is degraded the page behaves as a weekday: the regular ticket is the
+    one that fails safe (the broker just queues the order).
+  */
+  const session = weekendSession.ok ? weekendSession.data : undefined;
+  const weekendMode = session?.weekend_trading === true;
+  const initialTrades = weekendTrades.ok ? weekendTrades.data : undefined;
   // Most symbols have no xStock (404 "no_token"), and a Jupiter outage (502)
   // is not worth a panel either: the panel exists only when there is a token
   // price to show, so pages without one keep exactly their old layout. The
@@ -99,7 +118,10 @@ export default async function SymbolPage({
             ) : null}
           </p>
         </div>
-        <MarketStatus initialClock={initialClock} />
+        <div className="flex flex-wrap items-center gap-4">
+          {session ? <WeekendSwitch initialSession={session} /> : null}
+          <MarketStatus initialClock={initialClock} />
+        </div>
       </div>
 
       {asset && !asset.tradable ? (
@@ -140,11 +162,11 @@ export default async function SymbolPage({
           </Panel>
         </div>
 
-        <div className="lg:sticky lg:top-6">
+        <div className="grid gap-6 lg:sticky lg:top-6">
           {account.ok ? (
             <Panel>
               <PanelHead
-                title="Order ticket"
+                title={weekendMode ? "Weekend trade" : "Order ticket"}
                 aside={
                   <Link
                     href="/orders"
@@ -154,12 +176,16 @@ export default async function SymbolPage({
                   </Link>
                 }
               />
-              <OrderTicket
-                symbol={symbol}
-                buyingPower={account.data.buying_power}
-                initialQuote={initialQuote}
-                initialClock={initialClock}
-              />
+              {weekendMode && session ? (
+                <WeekendTicket symbol={symbol} session={session} />
+              ) : (
+                <OrderTicket
+                  symbol={symbol}
+                  buyingPower={account.data.buying_power}
+                  initialQuote={initialQuote}
+                  initialClock={initialClock}
+                />
+              )}
             </Panel>
           ) : (
             <ApiErrorPanel
@@ -167,6 +193,10 @@ export default async function SymbolPage({
               message="Placing an order needs your account balance, and it didn't answer. Nothing has changed — try again in a moment."
             />
           )}
+
+          {session ? (
+            <WeekendTradesPanel initialTrades={initialTrades} session={session} />
+          ) : null}
         </div>
       </div>
     </div>

@@ -105,7 +105,13 @@ function TicketForm({
   const [type, setType] = useState<OrderType>("market");
   const [limitPrice, setLimitPrice] = useState("");
   const [timeInForce, setTimeInForce] = useState<TimeInForce>("day");
+  const [extendedHours, setExtendedHours] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+
+  // The broker only allows extended hours on a day limit order; rather than
+  // error, the choice simply does not survive switching away from one.
+  const extendedEligible = type === "limit" && timeInForce === "day";
+  const extendedActive = extendedHours && extendedEligible;
 
   /*
     One key per confirmed ticket.
@@ -133,7 +139,15 @@ function TicketForm({
   const reviewHeading = useRef<HTMLParagraphElement>(null);
   const queryClient = useQueryClient();
 
-  const draft: OrderDraft = { symbol, qty, side, type, limitPrice, timeInForce };
+  const draft: OrderDraft = {
+    symbol,
+    qty,
+    side,
+    type,
+    limitPrice,
+    timeInForce,
+    extendedHours: extendedActive,
+  };
   const check = checkOrderDraft(draft);
 
   const last = quote.data?.last ?? null;
@@ -212,6 +226,7 @@ function TicketForm({
       <input type="hidden" name="type" value={type} />
       <input type="hidden" name="limit_price" value={limitPrice} />
       <input type="hidden" name="time_in_force" value={timeInForce} />
+      <input type="hidden" name="extended_hours" value={String(extendedActive)} />
       <input type="hidden" name="idempotency_key" value={idempotencyKey} />
 
       {reviewing ? (
@@ -223,6 +238,7 @@ function TicketForm({
           type={type}
           limitPrice={limitPrice}
           timeInForce={timeInForce}
+          extendedHours={extendedActive}
           estimate={estimate}
           costLabel={costLabel}
           power={power}
@@ -315,6 +331,24 @@ function TicketForm({
               />
             </div>
           </div>
+
+          {extendedEligible ? (
+            <label className="mt-5 flex items-start gap-2.5 text-[13px] text-ink-soft">
+              <input
+                type="checkbox"
+                checked={extendedHours}
+                onChange={(event) => setExtendedHours(event.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-[var(--color-accent,#1a56db)]"
+              />
+              <span>
+                Allow extended hours
+                <span className="block text-[12px] leading-relaxed text-ink-faint">
+                  The order can also fill 4:00–9:30 AM and 4:00–8:00 PM ET,
+                  where trading is thinner and prices move faster.
+                </span>
+              </span>
+            </label>
+          ) : null}
 
           <Estimate
             costLabel={costLabel}
@@ -570,6 +604,7 @@ function Review({
   type,
   limitPrice,
   timeInForce,
+  extendedHours,
   estimate,
   costLabel,
   power,
@@ -588,6 +623,7 @@ function Review({
   type: OrderType;
   limitPrice: string;
   timeInForce: TimeInForce;
+  extendedHours: boolean;
   estimate: number | null;
   costLabel: string;
   power: number | null;
@@ -624,6 +660,9 @@ function Review({
           term="Stays open"
           value={timeInForce === "gtc" ? "Until canceled" : "Today only"}
         />
+        {extendedHours ? (
+          <Line term="Extended hours" value="4 AM – 8 PM ET" />
+        ) : null}
         <Line
           term={costLabel}
           value={estimate === null ? "—" : formatUsd(estimate)}
