@@ -476,3 +476,103 @@ volatile moment of the session.
 one mechanism amendment (§6c). The notebook gains a second question
 beside `σ_gap`: the settlement moment. The engine, when built, places
 premarket limit orders first and never a market order in extended hours.
+
+---
+
+## ADR-018 — z is measured, not looked up: σ per symbol, one pooled multiplier
+
+**Date**: 2026-08-29 · **Status**: Accepted
+
+**Context**: The paper takes `z_α` from the normal table: `Φ⁻¹(0.99) =
+2.326`. That number is only correct if weekend gaps follow a bell curve.
+The measured gaps do not: pooled market gaps show excess kurtosis of 27
+(a normal curve has 0), which means extreme Mondays happen far more
+often than the bell curve predicts. Back-tested on 20 tokens over the
+recorded weekends, a reserve sized at z = 2.326 was breached on 4.65% of
+seller weekends — almost five times the 1% the paper promises. Full
+work-through with figures: `docs/SIZING-THE-RESERVE.md` and
+`notebooks/gap-volatility.ipynb`.
+
+**Decision**:
+- **Take z from the data, not the table.** z is the pooled empirical
+  99th percentile of standardized gaps, measured in the notebook. First
+  cut: **z ≈ 3.7**. Back-tested, that brings seller breaches to 0.87% —
+  under the promised 1% — at the cost of a larger reserve (drag rises
+  from 4.4% to 6.9% of trade value).
+- **σ_gap stays per symbol; z is one pooled number.** Volatility differs
+  honestly between symbols (each has enough data to measure its own σ).
+  Tail shape does not: per-symbol z estimates ranged from 2.1 (MCD) to
+  4.9 (NVDA) on so few weekends that the spread is mostly noise. Pooling
+  borrows every symbol's worst Mondays to estimate a shape none has
+  enough data to show alone.
+- **Re-measure as weekends accrue.** z is a notebook output, re-run
+  after each recorded weekend, not a constant in code. The engine reads
+  it from configuration with the measurement date beside it.
+
+**Consequences**: Reserves are about 60% larger than the paper's formula
+gives, and honest. The 10-NVDA worked example moves from ~$95 to ~$150.
+The paper's §6d needs an amendment: the formula stands, the source of
+`z_α` changes from the normal table to the empirical distribution.
+
+---
+
+## ADR-019 — The ERR engine: session routing, the weekend state machine, and a dev simulator
+
+**Date**: 2026-08-31 · **Status**: Accepted
+
+**Context**: The measurement phase answered how big the reserve must be
+(ADR-018) and when the hedge closes (ADR-017). What remained was the
+engine itself, plus two questions the owner raised: how to develop and
+test weekend behavior on a weekday, and what happens to orders placed
+after 4:00 PM. Research on the second changed the map: Alpaca's Broker
+API now offers 24/5 trading on the Blue Ocean ATS — an overnight session
+from 8:00 PM to 4:00 AM ET, Sunday night through Friday morning, limit
+orders only. A regulated venue is therefore open from Sunday 8:00 PM to
+Friday 8:00 PM. The true dead zone is 48 hours, not 65.
+
+**Decision**:
+- **Every hour of the week has exactly one execution path.** Regular
+  session: normal Alpaca orders. Premarket (4:00–9:30 AM) and
+  after-hours (4:00–8:00 PM): Alpaca limit orders with
+  `extended_hours`. Overnight weeknights (8:00 PM–4:00 AM): Alpaca
+  24/5 limit orders — adopted after one sandbox test order at 8:05 PM
+  confirms the sandbox supports the session. Weekend (Friday 8:00 PM to
+  Sunday 8:00 PM) and market holidays: the ERR engine. Jupiter is never
+  used for execution while any regulated session is open.
+- **The weekend trade is a state machine in its own table**:
+  `provisional` (Jupiter quote taken as `P_open` — bid for sells, ask
+  for buys; ERR computed per ADR-018; escrow journaled) →
+  `awaiting_settlement` (weekend over, hedge order placed) → `settled`
+  (real fill reconciled; surplus refunded or shortfall debited per
+  ADR-017; escrow released). A `breached` branch records shortfalls
+  beyond escrow. Every money movement is a double-entry ledger row.
+- **Escrow is real journals in the existing sweep account**, tagged in
+  the journal description, so Invariant 1 ("escrow covers every open
+  provisional trade") is a query, not a promise.
+- **The hedge closes at Monday 8:00 AM ET premarket** (limit, rolling to
+  the 9:30 auction), per the owner's earlier decision. Open follow-up:
+  the 24/5 session means the earliest possible close is now Sunday
+  8:00 PM. Whether that session is liquid enough is an empirical
+  question for the sampler and notebook before any change.
+- **A scheduled job settles trades.** No settlement runs inside a web
+  request.
+- **Dev weekend mode: fake the clock, nothing else.** Jupiter trades
+  24/7, so its quotes are live on a Tuesday. A dev-only toggle forces
+  `market_open = false`; the full engine then runs for real — quotes,
+  reserve, escrow journals, state machine. Two resolution modes:
+  **real** (default — the settlement job places a real sandbox order at
+  the actual next open, minutes away, and reconciles a real fill) and
+  **injected gap** (settle at `open × (1 + g)`, with `g` typed or drawn
+  from the measured distribution — the only way to watch the reserve
+  absorb, or fail to absorb, a 4σ Monday without waiting months for
+  one). All overrides live in one module that refuses to import outside
+  development.
+
+**Consequences**: The simulator is not throwaway — it is the engine with
+two injected seams (the clock, the settlement price source), which is
+also what makes the engine testable at all. The 48-hour dead zone
+shortens the exposure window `σ_gap` describes; the notebook should
+measure Friday-8PM-to-settlement rather than Friday-close-to-settlement,
+which will shrink σ somewhat. The paper gains a finding: the weekend
+problem is smaller than stated, and precisely bounded. One task blocks
+the overnight path: the 8:05 PM sandbox test.
