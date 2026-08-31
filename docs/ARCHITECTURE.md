@@ -142,6 +142,21 @@ cash to the firm sweep, land at $0 — each call reports `liquidating` or
 signature instead of a Clerk token, completed across Svix's retry
 schedule while liquidation waits for market open).
 
+ADR-019 additions (the ERR engine and its simulator): `GET /weekend/session`
+(which of the five trading windows it is — premarket, regular, after-hours,
+overnight, weekend — and whether the dev clock is faking it),
+`GET /weekend/preview` (Jupiter's executable quote for an exact size plus the
+measured reserve, before anyone commits), `POST /weekend/orders` /
+`GET /weekend/orders` / `GET /weekend/orders/{id}` (open and inspect weekend
+trades; every step is an event row carrying its Alpaca journal or order id),
+`POST /weekend/orders/{id}/settle` (advance a trade: `mode=market` places the
+real hedge, dev-only `mode=injected` settles at a chosen gap), and
+`POST /dev/clock` (development only — the simulated-weekend switch; 404 in
+production). `POST /orders` gains `extended_hours` for the 4–9:30 AM and
+4–8 PM sessions. Tables `weekend_trades` + `weekend_trade_events`; reserve
+parameters in `app/api/research_params.json` (ADR-018). The walkthrough
+lives in `docs/WEEKEND-SIMULATOR.md`.
+
 Developer tools: `scripts/dev_token.py` mints a one-hour Clerk token for
 Swagger and Postman. `scripts/make_postman.py` regenerates the collection.
 Database: Neon Postgres (`development` branch for local work), migrations
@@ -154,7 +169,7 @@ via `uv run alembic upgrade head` in `app/api`.
 - **Phase 2 — Trading core** ✅ verified with live fills (2026-08-27): symbol lookup + quotes, buy/sell by quantity, order status, cancel.
 - **Phase 3 — Dashboard** ✅ verified with live fills (2026-08-27): positions, portfolio chart, order history, activities, CSV export.
 - **Phase 4 — Production polish**: Postgres per ADR-014 ✅ (audit log, order idempotency, fills ledger for realized P/L — live 2026-08-27); Clerk `user.deleted` offboarding webhook and reset-balance per ADR-015 ✅ (code + tests 2026-08-27; the webhook registers with Clerk once the API has a public URL); production Clerk config (checklist in `docs/PRODUCTION.md`); deployment to Azure.
-- **Phase 5+ — Paper territory**: market-hours awareness, Jupiter integration, ERR engine, gap-volatility research (`notebooks/`).
+- **Phase 5+ — Paper territory**: market-hours awareness, Jupiter integration ✅ (read-only token prices 2026-08-29), gap-volatility research ✅ first cut (`notebooks/`, sampler + backfill live), ERR engine ✅ v1 with the weekend simulator (2026-08-31, verified live: real open→hedge→true-up cycle and an injected-gap breach); remaining: the scheduled settlement job, overnight-session verdict, holiday routing, RQ2–RQ5.
 
 ## Running locally
 

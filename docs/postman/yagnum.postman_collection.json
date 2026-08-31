@@ -225,7 +225,7 @@
                 "clock"
               ]
             },
-            "description": "Is the market open, and when does that next change?\n\nThe frontend needs this to say \"your order will queue until 9:30 AM\"\ninstead of leaving the user wondering why nothing filled."
+            "description": "Is the market open, and when does that next change?\n\nThe frontend needs this to say \"your order will queue until 9:30 AM\"\ninstead of leaving the user wondering why nothing filled.\n\nUnder the dev weekend override (ADR-019) `is_open` is forced false and\n`simulated` says so: the whole app then behaves as it will on a real\nSaturday. Only this route's answer is faked - everything that records\ndata (the sampler) reads Alpaca's clock directly and never sees this."
           },
           "response": []
         },
@@ -644,6 +644,167 @@
               ]
             },
             "description": "Verify the Svix signature, then act on `user.deleted`.\n\n`async` only to read the raw body (the exact bytes are what is signed);\nthe blocking work then runs in a worker thread via `run_in_threadpool`,\nsame as every `def` route in this codebase."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "weekend",
+      "item": [
+        {
+          "name": "GET /weekend/orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/weekend/orders",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "weekend",
+                "orders"
+              ]
+            },
+            "description": "List Weekend Orders"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /weekend/orders/{trade_id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/weekend/orders/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "weekend",
+                "orders",
+                ""
+              ]
+            },
+            "description": "Get Weekend Order"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /weekend/preview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/weekend/preview?symbol={{symbol}}&side=&qty=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "weekend",
+                "preview"
+              ],
+              "query": [
+                {
+                  "key": "symbol",
+                  "value": "{{symbol}}",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "side",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "qty",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "What this weekend trade would cost, before anyone commits to it.\n\nEverything the confirmation screen shows: the executable Jupiter price\nfor this exact size and direction, the measured inputs, the reserve."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /weekend/session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/weekend/session",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "weekend",
+                "session"
+              ]
+            },
+            "description": "The effective trading window, and whether the simulator can exist.\n\n`dev_toggle` tells the frontend whether to render the weekday/weekend\nswitch at all - true only in development."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /dev/clock",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dev/clock",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dev",
+                "clock"
+              ]
+            },
+            "description": "Development only: force the app's clock into (or out of) the weekend."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /weekend/orders",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/weekend/orders",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "weekend",
+                "orders"
+              ]
+            },
+            "description": "Open a weekend trade: Jupiter quote, reserve to escrow, cash moved."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /weekend/orders/{trade_id}/settle",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/weekend/orders//settle",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "weekend",
+                "orders",
+                "",
+                "settle"
+              ]
+            },
+            "description": "Advance one trade toward settled. Safe to call repeatedly."
           },
           "response": []
         }
