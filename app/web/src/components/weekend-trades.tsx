@@ -4,7 +4,6 @@ import { useActionState, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { buttonStyles } from "@/components/button";
-import { Delta } from "@/components/delta";
 import { Panel, PanelHead } from "@/components/panel";
 import { settleWeekendTrade, type SettleTradeState } from "@/lib/actions";
 import {
@@ -101,74 +100,136 @@ function TradeRow({
 
   return (
     <li className="py-4">
+      {/* Line 1: what you did, and where it stands. */}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <p className="text-[14px] text-ink">
-          <span className="font-semibold">
-            {trade.side === "sell" ? "Sold" : "Bought"}{" "}
-            <span className="figure-nums">{formatQty(trade.qty)}</span>{" "}
-            {trade.symbol}
-          </span>{" "}
-          <span className="text-ink-soft">
-            at <span className="figure-nums">{formatUsd(trade.p_open)}</span> on
-            Jupiter
-          </span>
+        <p className="text-[14px] font-semibold text-ink">
+          {trade.side === "sell" ? "Sold" : "Bought"}{" "}
+          <span className="figure-nums">{formatQty(trade.qty)}</span> {trade.symbol}
           {trade.simulated ? (
             <span className="ml-2 rounded-full border border-stamp-rule bg-stamp-wash px-2 py-0.5 text-[10px] font-medium text-stamp">
-              simulated weekend
+              simulated
             </span>
           ) : null}
         </p>
         <StateChip trade={trade} />
       </div>
 
-      <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-[13px] text-ink-soft">
-        <div>
-          <dt className="sr-only">Reserve</dt>
-          <dd>
-            Reserve <span className="figure-nums text-ink">{formatUsd(trade.reserve)}</span>
-          </dd>
-        </div>
+      {/* Line 2: the two prices that define the trade. */}
+      <p className="figure-nums mt-1.5 text-[13px] text-ink-soft">
+        <span className="text-ink">{formatUsd(trade.p_open)}</span> weekend price
         {trade.p_close ? (
-          <div>
-            <dt className="sr-only">Settled price</dt>
-            <dd>
-              {trade.settlement_mode === "injected" ? "Injected close" : "Settled at"}{" "}
-              <span className="figure-nums text-ink">{formatUsd(trade.p_close)}</span>
-            </dd>
-          </div>
-        ) : null}
-        {trade.true_up ? (
-          <div className="flex items-baseline gap-1.5">
-            <dt>True-up</dt>
-            <dd>
-              <Delta amount={toNumber(trade.true_up) ?? 0} />
-            </dd>
-          </div>
-        ) : null}
-        {trade.escrow_returned !== null && !open ? (
-          <div>
-            <dt className="sr-only">Escrow returned</dt>
-            <dd>
-              Reserve returned{" "}
-              <span className="figure-nums text-ink">
-                {formatUsd(trade.escrow_returned)}
-              </span>
-            </dd>
-          </div>
-        ) : null}
-        {trade.shortfall ? (
-          <div>
-            <dt className="sr-only">Shortfall</dt>
-            <dd className="text-loss">
-              Debited beyond reserve{" "}
-              <span className="figure-nums">{formatUsd(trade.shortfall)}</span>
-            </dd>
-          </div>
-        ) : null}
-      </dl>
+          <>
+            {" "}
+            <span aria-hidden>→</span>{" "}
+            <span className="text-ink">{formatUsd(trade.p_close)}</span>
+            {trade.settlement_mode === "injected"
+              ? ` pretend Monday (${formatGap(trade.injected_gap)})`
+              : " when the market reopened"}
+          </>
+        ) : (
+          <> · {formatUsd(trade.reserve)} reserve held</>
+        )}
+      </p>
+
+      {/* Line 3: the story of the money, in words. */}
+      <p className="mt-1.5 max-w-md text-[13px] leading-relaxed text-ink-soft">
+        <Outcome trade={trade} />
+      </p>
 
       {open ? <SettleControls trade={trade} session={session} /> : null}
     </li>
+  );
+}
+
+/** "+12%" from the stored fraction "0.12". */
+function formatGap(fraction: string | null): string {
+  const value = toNumber(fraction);
+  if (value === null) return "";
+  const pct = value * 100;
+  return `${pct > 0 ? "+" : ""}${pct.toFixed(pct % 1 === 0 ? 0 : 1)}%`;
+}
+
+/**
+ * One plain sentence per state. No engine vocabulary: "true-up",
+ * "escrow", and "shortfall" stay in the API; the reader gets what happened
+ * to their money and why.
+ */
+function Outcome({ trade }: { trade: WeekendTrade }) {
+  const reserve = formatUsd(trade.reserve);
+
+  if (trade.state === "provisional") {
+    return (
+      <>
+        Your price is locked and{" "}
+        {trade.side === "sell" ? "the cash is in your account" : "paid"}.{" "}
+        The {reserve} reserve waits for the market to reopen.
+      </>
+    );
+  }
+
+  if (trade.state === "awaiting_settlement") {
+    return (
+      <>
+        A real {trade.side} order is working at the broker
+        {trade.hedge_order_id ? (
+          <>
+            {" "}
+            (<span className="figure-nums tracking-[0.03em]">
+              {trade.hedge_order_id.slice(0, 8)}…
+            </span>)
+          </>
+        ) : null}
+        . When it fills, the trade settles at that price.
+      </>
+    );
+  }
+
+  if (trade.state === "breached") {
+    return (
+      <>
+        The price moved further than the whole reserve covered: all{" "}
+        <span className="figure-nums text-ink">{reserve}</span> was used and{" "}
+        <span className="figure-nums text-loss">{formatUsd(trade.shortfall)}</span>{" "}
+        more came out of your cash. You still ended at the settlement price —
+        the reserve is a cushion, not a limit.
+      </>
+    );
+  }
+
+  // Settled. Compare what came back with what was held: the difference IS
+  // the weekend's price move, and which side of the reserve it landed on.
+  const held = toNumber(trade.reserve) ?? 0;
+  const returned = toNumber(trade.escrow_returned) ?? 0;
+  const diff = returned - held;
+  const returnedText = (
+    <span className="figure-nums text-ink">{formatUsd(trade.escrow_returned)}</span>
+  );
+
+  if (Math.abs(diff) < 0.005) {
+    return (
+      <>
+        You ended at the real market price. The price barely moved, so your
+        whole {reserve} reserve came back.
+      </>
+    );
+  }
+  if (diff < 0) {
+    return (
+      <>
+        You ended at the real market price. The{" "}
+        <span className="figure-nums">{formatUsd(-diff)}</span> the price moved
+        against you came out of the reserve: {returnedText} of {reserve} came
+        back.
+      </>
+    );
+  }
+  return (
+    <>
+      You ended at the real market price — better than your weekend price. The
+      full {reserve} reserve came back plus the{" "}
+      <span className="figure-nums">{formatUsd(diff)}</span> the price moved
+      your way: {returnedText} in all.
+    </>
   );
 }
 
@@ -248,16 +309,6 @@ function SettleControls({
           </form>
         ) : null}
       </div>
-
-      {waiting && trade.hedge_order_id ? (
-        <p className="mt-2 text-[12px] text-ink-faint">
-          A real {trade.side} order is working at the broker (
-          <span className="figure-nums tracking-[0.03em]">
-            {trade.hedge_order_id.slice(0, 8)}…
-          </span>
-          ). Check again once the session can fill it.
-        </p>
-      ) : null}
 
       <p aria-live="polite" className="mt-2 min-h-4 text-[12px] text-loss">
         {state.status === "error" ? state.message : ""}
