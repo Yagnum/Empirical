@@ -104,7 +104,8 @@ The reserve is `qty × price × σ × z`. Two measured inputs:
   NVDA 2.7%, MCD 0.7%, MSTR 4.8%. Each symbol gets the larger of two
   independent measurements (2 years of real market weekends; the token
   record), the conservative choice while the token record is thin.
-- **z (one pooled number, 3.7759)** — how heavy the tails are. The paper
+- **z (one pooled number, ≈3.77 — 3.7742 as of Aug 31)** — how heavy the
+  tails are. The paper
   assumed a bell curve and took 2.326 from the normal table; the measured
   gaps have excess kurtosis of 27 (a bell curve has 0), and back-testing
   showed 2.326 gets breached ~5× more often than promised. The empirical
@@ -209,9 +210,13 @@ would have been trued up +0.68% at settlement; the move was a tenth of
 what the reserve is sized for. This is the engine's risk, watched live at
 5-minute resolution for the first time.
 
-**What we do with this data:** re-execute the notebook (running today) so
-weekend #1 joins the record; refresh `research_params.json` from its
-output; repeat after every weekend. Each weekend sharpens σ, z, and the
+**What we do with this data:** top up the history tables
+(`backfill_history.py --write --days 4`), re-execute the notebook so
+weekend #1 joins the record, refresh `research_params.json` from its
+output; repeat after every weekend. Done today: token-weekends 355 → 407,
+pooled z 3.7759 → 3.7742 (stability is the finding — the multiplier is
+signal, not noise), and two brand-new xStocks (BRK.Bx, GMEx) entered the
+record automatically because the token list is fetched live. Each weekend sharpens σ, z, and the
 settlement-moment answer — the premarket table now has real 5-minute
 observations instead of backfilled minute bars alone. (One instrument
 note: Alpaca's free IEX feed printed no premarket share trades this

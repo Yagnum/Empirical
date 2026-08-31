@@ -12,7 +12,7 @@ Three layers, tested separately:
 from __future__ import annotations
 
 import datetime as dt
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -97,23 +97,38 @@ def test_override_on_a_real_weekend_is_not_simulated():
 
 
 def test_reserve_uses_measured_sigma_and_pooled_z():
+    """The formula against the *current* research_params.json.
+
+    The parameters refresh after every recorded weekend (ADR-018), so the
+    expectations derive from the same file the engine reads - the test pins
+    the wiring and the arithmetic, not last week's measurements.
+    """
+    params = err.params()
     sizing = err.compute("NVDA", Decimal("10"), Decimal("226"))
-    assert sizing["sigma"] == Decimal("0.0270")
+    assert sizing["sigma"] == Decimal(params["sigma"]["NVDA"]["used"])
     assert sizing["sigma_source"] == "measured"
-    assert sizing["z"] == Decimal("3.7759")
-    # 10 * 226 * 0.0270 * 3.7759 = 230.405418, ceiling to the cent.
-    assert sizing["reserve"] == Decimal("230.41")
+    assert sizing["z"] == Decimal(params["z"])
+    # The measured multiplier must never silently revert to the normal
+    # table's 2.326 - that regression is the whole point of ADR-018.
+    assert sizing["z"] > Decimal("3")
+    expected = (Decimal("10") * Decimal("226") * sizing["sigma"] * sizing["z"]).quantize(
+        Decimal("0.01"), rounding=ROUND_CEILING
+    )
+    assert sizing["reserve"] == expected
 
 
 def test_reserve_rounds_up_never_down():
-    sizing = err.compute("MCD", Decimal("1"), Decimal("100"))
-    # 100 * 0.0071 * 3.7759 = 2.6808... -> 2.69, not 2.68.
-    assert sizing["reserve"] == Decimal("2.69")
+    # A price chosen so sigma * z * notional lands between cents for any
+    # plausible parameters: the ceiling rule must round toward more cover.
+    sizing = err.compute("MCD", Decimal("1"), Decimal("100.37"))
+    exact = Decimal("100.37") * sizing["sigma"] * sizing["z"]
+    assert sizing["reserve"] >= exact
+    assert sizing["reserve"] - exact < Decimal("0.01")
 
 
 def test_unmeasured_symbol_falls_back_to_pooled_sigma():
     sizing = err.compute("ZZZZ", Decimal("1"), Decimal("100"))
-    assert sizing["sigma"] == Decimal("0.0251")
+    assert sizing["sigma"] == Decimal(err.params()["pooled_sigma"])
     assert sizing["sigma_source"] == "pooled_fallback"
 
 
@@ -143,6 +158,21 @@ class Broker:
         self.last_trade_price = "200"
 
     def install(self, monkeypatch):
+        # Pin the reserve parameters: the real research_params.json refreshes
+        # after every recorded weekend, and the flow tests' hand-checked cash
+        # figures (40.78 escrow on 2 x 200 NVDA, and so on) must not drift
+        # with it. The err unit tests above cover the live file.
+        monkeypatch.setattr(
+            err,
+            "_params_cache",
+            {
+                "generated_at": "pinned-for-tests",
+                "z": "3.7759",
+                "fees": "0.00",
+                "pooled_sigma": "0.0251",
+                "sigma": {"NVDA": {"used": "0.0270"}},
+            },
+        )
         monkeypatch.setattr(settings, "alpaca_firm_account_id", "firm-0001")
         monkeypatch.setattr(alpaca, "list_positions", lambda account_id: self.positions)
         monkeypatch.setattr(
