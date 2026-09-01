@@ -164,11 +164,13 @@ it to be in.
 The simulator is built; two facts about the *real* extended sessions still
 need measuring, and only the clock can run these:
 
-**5:00 PM ET — after-hours.** Place an extended-hours limit order (the new
-checkbox on the regular ticket), and settle a weekend trade with
-`mode=market` so the hedge goes out as a marketable limit with
-`extended_hours=true`. Question: does the sandbox actually fill in the
-4–8 PM window, and how fast?
+**After-hours — answered Tue Sep 1, 4:02 PM ET.** Both worked, in seconds:
+an extended-hours limit buy at $218.50 filled within 5 s at $217.61 (the
+market, better than the limit); a weekend sell opened at Jupiter's bid
+$217.72 settled into the after-hours session — hedge placed as a
+marketable limit at $216.34 with `extended_hours`, filled at $217.46,
+reconciled to `settled`. The sandbox honours the 4–8 PM window and fills
+at the market, not the floor.
 
 **8:05 PM ET — overnight (the ADR-019 blocker).** Place a 1-share limit
 order after 8 PM. Alpaca's 24/5 session needs enablement by their team on
