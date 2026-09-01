@@ -234,12 +234,13 @@ currently our *only* premarket witness at 5-minute resolution.)
 - **The overnight verdict** — tonight's 8:05 PM sandbox test decides
   whether Alpaca's 24/5 session works for us, or those hours join the
   engine's window.
-- **Market holidays** — the calendar treats them as weekdays; orders would
-  queue at the broker instead of routing to the engine. Known limit,
-  recorded in ADR-019.
-- **Research questions 2–5** — record the token bid/ask spread every 5
-  minutes (the sampler extension), simulate the paper's cascade on 1,864
-  weekends, off-hours tracking, engine-ledger reconciliation.
+- **Research questions 3–5** — simulate the paper's cascade on the
+  recorded weekends, off-hours tracking, engine-ledger reconciliation.
+  (RQ2 is answered by the sampler now: since Sep 1 every run records the
+  executable bid/ask for ~$1,000 each way — ADR-020 — and the first
+  snapshot already shows the spread varying ~70× across tokens. Market
+  holidays now route to the engine via Alpaca's calendar — ADR-021 — so
+  Labor Day weekend runs as one 72-hour engine window.)
 - **Azure deployment** — deliberately last (owner's call): ship when the
   app is essentially done. The checklist is in
   [PRODUCTION.md](PRODUCTION.md).

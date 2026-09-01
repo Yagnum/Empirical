@@ -264,7 +264,7 @@ exact decimal digits — never a floating-point number (ADR-010).
 
 | Table | One row is | Rows (2026-08-29) | Written by | Source |
 | --- | --- | --- | --- | --- |
-| `token_prices` | one token, one 5-minute moment: Jupiter price, Alpaca last trade, market open? | 4,960 and growing by 5,760 a day | `scripts/sample_prices.py`, run every 5 minutes by the GitHub Actions cron `.github/workflows/sample-prices.yml` | Jupiter Price API v3; Alpaca latest trades |
+| `token_prices` | one token, one 5-minute moment: Jupiter price, Alpaca last trade, market open? — and since 2026-09-01 the executable bid/ask for ~$1,000 each way (`bid_usd`, `ask_usd`, impact columns; ADR-020) | 4,960 and growing by 5,760 a day | `scripts/sample_prices.py`, run every 5 minutes by the GitHub Actions cron `.github/workflows/sample-prices.yml` | Jupiter Price API v3; Alpaca latest trades |
 | `token_candles` | one token, one hour (or day): open, high, low, close, volume | 57,861 | `scripts/backfill_history.py`, run once | GeckoTerminal OHLCV (free tier: last 180 days) |
 | `market_bars` | one share, one day or one minute: open, high, low, close, volume, trade count | 38,820 | same script, run once | Alpaca market data, IEX feed (2 years daily; Monday 04:00–10:30 ET minutes) |
 

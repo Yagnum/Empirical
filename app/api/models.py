@@ -371,6 +371,15 @@ class TokenPrice(Base):
     market_trade_at: Mapped[dt.datetime | None] = mapped_column(TZ)
     # Alpaca's clock at sampling time; null if the clock call failed.
     market_open: Mapped[bool | None] = mapped_column(Boolean)
+    # The executable spread for a fixed ~$1,000, both directions (ADR-020,
+    # the paper's RQ2): what a seller would receive and a buyer would pay
+    # per token, with Jupiter's own price-impact figure for each leg. Null
+    # when the quote legs failed - the price row is still worth keeping.
+    bid_usd: Mapped[Decimal | None] = mapped_column(MONEY)
+    ask_usd: Mapped[Decimal | None] = mapped_column(MONEY)
+    bid_impact_pct: Mapped[Decimal | None] = mapped_column(Numeric(18, 10))
+    ask_impact_pct: Mapped[Decimal | None] = mapped_column(Numeric(18, 10))
+    quote_size_usd: Mapped[Decimal | None] = mapped_column(MONEY)
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="jupiter_price_v3")
 
 

@@ -34,6 +34,16 @@ def clean_override():
     sessions._simulate_weekend = False
 
 
+@pytest.fixture(autouse=True)
+def no_calendar_network(monkeypatch):
+    """Session routing must never reach Alpaca's calendar from a unit test.
+
+    None = the weekday-arithmetic fallback; the holiday tests below pass an
+    explicit `trading_days` set instead.
+    """
+    monkeypatch.setattr(sessions, "_trading_days", lambda: None)
+
+
 # ---------------------------------------------------------------------------
 # sessions.py - the calendar
 # ---------------------------------------------------------------------------
@@ -70,6 +80,37 @@ def test_scheduled_session_handles_utc_input():
     # Saturday 01:00 UTC is Friday 9 PM ET - inside the weekend.
     moment = dt.datetime(2026, 8, 29, 1, 0, tzinfo=dt.timezone.utc)
     assert sessions.scheduled_session(moment) == sessions.WEEKEND
+
+
+# Labor Day week, 2026: Monday Sep 7 is a market holiday.
+_LABOR_WEEK = frozenset(
+    dt.date(2026, 9, day) for day in (3, 4, 8, 9, 10, 11)  # trading days only
+)
+
+
+def _labor(day: int, hour: int, minute: int = 0) -> dt.datetime:
+    return dt.datetime(2026, 9, day, hour, minute, tzinfo=ET)
+
+
+@pytest.mark.parametrize(
+    ("moment", "expected"),
+    [
+        (_labor(7, 13, 0), sessions.WEEKEND),  # holiday Monday, 1 PM
+        (_labor(7, 5, 0), sessions.WEEKEND),  # holiday premarket
+        (_labor(6, 21, 0), sessions.WEEKEND),  # Sunday 9 PM: overnight would
+        # trade INTO the holiday, so it does not exist
+        (_labor(7, 21, 0), sessions.OVERNIGHT),  # Monday 9 PM trades into Tue
+        (_labor(8, 10, 0), sessions.REGULAR),  # Tuesday: a normal day again
+    ],
+)
+def test_market_holidays_belong_to_the_weekend_engine(moment, expected):
+    assert sessions.scheduled_session(moment, trading_days=_LABOR_WEEK) == expected
+
+
+def test_unknown_calendar_falls_back_to_weekday_arithmetic():
+    # _trading_days is mocked to None here: a holiday Monday then looks like
+    # a regular Monday - the harmless pre-ADR-021 behaviour.
+    assert sessions.scheduled_session(_labor(7, 13, 0)) == sessions.REGULAR
 
 
 def test_override_flips_only_in_development(monkeypatch):

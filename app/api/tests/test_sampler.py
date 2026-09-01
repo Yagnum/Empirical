@@ -32,12 +32,23 @@ TRADES = {"NVDA": {"p": "219.955", "s": "167", "t": "2026-08-28T16:58:44.5733152
 WHEN = datetime(2026, 8, 28, 17, 0, tzinfo=timezone.utc)
 
 
+SPREAD = {
+    "bid": Decimal("220.19"),
+    "ask": Decimal("220.31"),
+    "bid_impact_pct": Decimal("0.0004"),
+    "ask_impact_pct": Decimal("0.0005"),
+    "quote_size_usd": Decimal("1000"),
+}
+
+
 @pytest.fixture
 def feeds(monkeypatch):
     monkeypatch.setattr(jupiter, "list_xstocks", lambda: list(TOKENS))
     monkeypatch.setattr(jupiter, "prices", lambda mints: dict(QUOTES))
+    monkeypatch.setattr(jupiter, "spread_quote", lambda token, last: dict(SPREAD))
     monkeypatch.setattr(alpaca, "latest_trades", lambda symbols: dict(TRADES))
     monkeypatch.setattr(alpaca, "get_clock", lambda: {"is_open": True})
+    monkeypatch.setattr(sampler, "SPREAD_DELAY_SECONDS", 0)
 
 
 def test_snapshot_keeps_jupiter_digits_exactly(feeds):
@@ -51,6 +62,25 @@ def test_snapshot_keeps_jupiter_digits_exactly(feeds):
     assert nvda.sampled_at == WHEN
     # Alpaca's nanosecond timestamp is truncated to what datetime holds.
     assert nvda.market_trade_at == datetime(2026, 8, 28, 16, 58, 44, 573315, tzinfo=timezone.utc)
+
+
+def test_snapshot_records_the_spread(feeds):
+    rows = {row.symbol: row for row in sampler.sample_once(WHEN)}
+    nvda = rows["NVDAx"]
+    assert nvda.bid_usd == Decimal("220.19")
+    assert nvda.ask_usd == Decimal("220.31")
+    assert nvda.quote_size_usd == Decimal("1000")
+
+
+def test_failed_spread_quote_does_not_lose_the_price(feeds, monkeypatch):
+    def boom(token, last):
+        raise jupiter.JupiterError("rate limited", status_code=429)
+
+    monkeypatch.setattr(jupiter, "spread_quote", boom)
+    rows = sampler.sample_once(WHEN)
+    assert len(rows) == 2
+    assert all(row.usd_price is not None for row in rows)
+    assert all(row.bid_usd is None and row.ask_usd is None for row in rows)
 
 
 def test_token_without_a_listed_share_still_records_the_token(feeds):

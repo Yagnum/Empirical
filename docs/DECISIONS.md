@@ -576,3 +576,64 @@ measure Friday-8PM-to-settlement rather than Friday-close-to-settlement,
 which will shrink σ somewhat. The paper gains a finding: the weekend
 problem is smaller than stated, and precisely bounded. One task blocks
 the overnight path: the 8:05 PM sandbox test.
+
+---
+
+## ADR-020 — Record the spread: two executable quotes per token, every five minutes
+
+**Date**: 2026-09-01 · **Status**: Accepted
+
+**Context**: The paper's Research Question 2 asks how liquidity providers
+price weekend risk. The answer is the spread — the distance between what a
+seller receives and a buyer pays — and `token_prices` recorded only the
+last-swap midpoint. Nobody publishes token spreads historically; like the
+gap itself (ADR-016), the only way to have the data is to start recording
+before it is needed. Labor Day weekend (a 72-hour closure) was four days
+away at the time of the decision.
+
+**Decision**:
+- **Each sampler run quotes each token both ways at a fixed ~$1,000**:
+  USDC→token (the ask) and token→USDC (the bid), via Jupiter's swap-quote
+  API. One size for every token and every run, so the series is comparable
+  across both. Five new nullable columns on `token_prices`: `bid_usd`,
+  `ask_usd`, `bid_impact_pct`, `ask_impact_pct`, `quote_size_usd`.
+- **Best effort, like the Alpaca side**: a failed quote leg loses the
+  spread columns, never the price observation.
+- **Paced to Jupiter's gateway**: a burst of quote calls 429s after a
+  handful (measured live). Delays inside and between quotes hold the run
+  to ~1 request/second — ~45 seconds per run, invisible at a five-minute
+  cadence.
+
+**Consequences**: The first live snapshot already answers RQ2's opening
+question — the spread varies ~70× across tokens (SPYx 0.04%, NVDAx 0.10%,
+PLTRx 2.7%) — and every run from now on records how it breathes across
+weekends. A future reserve model can price the exit cost per symbol
+instead of ignoring it.
+
+---
+
+## ADR-021 — Market holidays belong to the weekend engine
+
+**Date**: 2026-09-01 · **Status**: Accepted
+
+**Context**: ADR-019 routed sessions by weekday arithmetic and listed
+holidays as a known limit: on a holiday the router said "regular" while
+every venue was closed. Labor Day (Monday 2026-09-07) made the limit
+concrete — a 72-hour dead zone the engine would have misrouted.
+
+**Decision**:
+- **A non-trading weekday routes exactly like a weekend**, for every
+  window it owns. The overnight session that would trade *into* a holiday
+  is closed too: Sunday 8 PM before a holiday Monday stays "weekend",
+  because the 24/5 session only opens when the next day trades.
+- **Trading days come from Alpaca's calendar endpoint**, fetched once per
+  day and cached; a stale copy survives an outage. If the calendar has
+  never been fetchable, the router falls back to weekday arithmetic — the
+  pre-ADR-021 behaviour, in which a holiday order harmlessly queues.
+- **Early-close days stay a known limit**: the 1 PM closes around
+  Thanksgiving and Christmas are still routed as full days; an afternoon
+  order queues instead of reaching the engine.
+
+**Consequences**: Labor Day weekend runs Friday 8 PM → Tuesday 4 AM as one
+continuous engine window, and the first scheduled-settlement run lands
+Tuesday 2026-09-08 — with real 72-hour gap data behind it.

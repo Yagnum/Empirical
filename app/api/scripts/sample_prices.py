@@ -31,7 +31,10 @@ def main() -> None:
         gap = ""
         if row.market_price:
             gap = f"  gap {(row.usd_price / row.market_price - 1) * 100:+.3f}%"
-        print(f"  {row.symbol:<7} jup {row.usd_price:>20}   mkt {market}{gap}")
+        spread = ""
+        if row.bid_usd and row.ask_usd:
+            spread = f"  spread {(row.ask_usd / row.bid_usd - 1) * 100:.3f}%"
+        print(f"  {row.symbol:<7} jup {row.usd_price:>20}   mkt {market}{gap}{spread}")
 
     if not write:
         print("\ndry run. Pass --write to append these rows.")

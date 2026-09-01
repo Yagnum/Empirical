@@ -504,6 +504,17 @@ def get_clock() -> dict:
     return _request("GET", "/v1/clock")
 
 
+def get_calendar(start: str, end: str) -> list[dict]:
+    """GET /v1/calendar - the trading days between two dates, inclusive.
+
+    Each row: {"date": "2026-09-08", "open": "09:30", "close": "16:00", ...}.
+    A weekday absent from the list is a market holiday - which is how the
+    session router learns that Labor Day is not a Monday (ADR-021).
+    """
+    result = _request("GET", "/v1/calendar", params={"start": start, "end": end})
+    return result if isinstance(result, list) else []
+
+
 # Alpaca's assets endpoint has no search parameter, so symbol lookup means
 # holding the list ourselves. It is ~14,000 rows / 6 MB of JSON and takes well
 # under a second to fetch, but doing that per keystroke would be absurd - so

@@ -225,6 +225,58 @@ def executable_price(token: dict, side: str, qty: Decimal) -> dict:
     }
 
 
+# The fixed notional the sampler prices the spread at (ADR-020). One size
+# for every token and every run, so the series is comparable across both.
+SPREAD_QUOTE_USD = Decimal("1000")
+
+# Pause between a spread's two legs, for the same rate limit the sampler's
+# per-token delay respects: together they keep the calls near 1/second.
+SPREAD_LEG_DELAY_SECONDS = 0.6
+
+
+def spread_quote(token: dict, last_price: Decimal) -> dict:
+    """The executable bid and ask for ~$1,000 of this xStock, right now (RQ2).
+
+    Two quotes, one in each direction:
+      ask  $1,000 of USDC -> tokens: what a buyer pays per token
+      bid  ~$1,000 of tokens -> USDC: what a seller receives per token
+    (`last_price` sizes the bid leg's token amount; the *result* never
+    depends on it - the quoted amounts do the pricing.)
+
+    Returns {"bid", "ask", "bid_impact_pct", "ask_impact_pct",
+    "quote_size_usd"}, Decimals throughout. The ask-minus-bid distance is
+    how the liquidity providers charge for weekend risk - the paper's RQ2.
+    """
+    decimals = int(token["decimals"])
+    mint = str(token["mint"])
+    if last_price <= 0:
+        raise JupiterError("no last price to size the spread quote from")
+
+    ask_body = swap_quote(USDC_MINT, mint, to_base_units(SPREAD_QUOTE_USD, USDC_DECIMALS))
+    tokens_out = from_base_units(str(ask_body["outAmount"]), decimals)
+    if tokens_out <= 0:
+        raise JupiterError("ask quote returned zero tokens")
+
+    if SPREAD_LEG_DELAY_SECONDS:
+        time.sleep(SPREAD_LEG_DELAY_SECONDS)
+
+    qty = (SPREAD_QUOTE_USD / last_price).quantize(Decimal(1).scaleb(-decimals))
+    if qty <= 0:
+        raise JupiterError("bid quote size rounds to zero tokens")
+    bid_body = swap_quote(mint, USDC_MINT, to_base_units(qty, decimals))
+    usd_out = from_base_units(str(bid_body["outAmount"]), USDC_DECIMALS)
+    if usd_out <= 0:
+        raise JupiterError("bid quote returned zero USDC")
+
+    return {
+        "bid": usd_out / qty,
+        "ask": SPREAD_QUOTE_USD / tokens_out,
+        "bid_impact_pct": Decimal(str(bid_body.get("priceImpactPct") or "0")),
+        "ask_impact_pct": Decimal(str(ask_body.get("priceImpactPct") or "0")),
+        "quote_size_usd": SPREAD_QUOTE_USD,
+    }
+
+
 def prices(mints: Iterable[str]) -> dict[str, dict]:
     """{mint -> price/v3 entry} for these mints, chunked to the API's ceiling.
 

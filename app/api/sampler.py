@@ -2,6 +2,8 @@
 
     tokens  = jupiter.list_xstocks()          which tokens exist right now
     quotes  = jupiter.prices(mints)           what each last swapped at
+    spread  = jupiter.spread_quote(...)       executable bid/ask for ~$1,000
+                                              (two quote calls per token, ADR-020)
     trades  = alpaca.latest_trades(shares)    what each real share last traded at
     clock   = alpaca.get_clock()              is the real market open
 
@@ -19,6 +21,7 @@ failure, by contrast, is a failed run (there is nothing to record).
 from __future__ import annotations
 
 import sys
+import time
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
@@ -26,6 +29,13 @@ import alpaca
 import db
 import jupiter
 from models import TokenPrice
+
+# A breath between tokens (ADR-020). Jupiter's gateway allows roughly one
+# request per second on our tier - a burst 429s after a handful (measured
+# live, 2026-09-01). With the leg delay in jupiter.spread_quote this paces
+# the ~40 quote calls to just under that: a run takes ~45 seconds, which a
+# five-minute cadence does not notice. Tests zero this.
+SPREAD_DELAY_SECONDS = 1.2
 
 
 def _decimal(value) -> Decimal | None:
@@ -88,6 +98,17 @@ def sample_once(now: datetime | None = None) -> list[TokenPrice]:
         trade = trades.get(token["underlying"]) if token["underlying"] else {}
         trade = trade or {}
         block_id = quote.get("blockId")
+
+        # The spread (ADR-020): best effort, like the Alpaca side. A failed
+        # quote leg loses the spread columns, never the price observation.
+        spread: dict = {}
+        try:
+            spread = jupiter.spread_quote(token, usd_price)
+        except (jupiter.JupiterError, ValueError, KeyError) as exc:
+            print(f"[sampler] no spread for {token['symbol']}: {exc}", file=sys.stderr)
+        if SPREAD_DELAY_SECONDS:
+            time.sleep(SPREAD_DELAY_SECONDS)
+
         rows.append(
             TokenPrice(
                 sampled_at=sampled_at,
@@ -101,6 +122,11 @@ def sample_once(now: datetime | None = None) -> list[TokenPrice]:
                 market_price=_decimal(trade.get("p")),
                 market_trade_at=_moment(trade.get("t")),
                 market_open=market_open,
+                bid_usd=spread.get("bid"),
+                ask_usd=spread.get("ask"),
+                bid_impact_pct=spread.get("bid_impact_pct"),
+                ask_impact_pct=spread.get("ask_impact_pct"),
+                quote_size_usd=spread.get("quote_size_usd"),
             )
         )
     return rows

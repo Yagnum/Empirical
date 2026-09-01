@@ -48,7 +48,7 @@ Every hour of the week has exactly one execution path (ADR-019):
 
 The surprise from the research: Alpaca now covers 24/5, so the true dead
 zone is 48 hours, not 65. Yagnum's engine exists for exactly those 48 hours
-(plus market holidays — not yet modelled, listed as an open item).
+(plus market holidays, which route like weekends via Alpaca's calendar — ADR-021).
 
 ---
 
