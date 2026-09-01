@@ -1,7 +1,8 @@
 # Project Yagnum — the whole thing, explained
 
 A tour of everything that exists, how it works, and why it is built that
-way. Written 2026-08-31, the day the ERR engine went live. Each section
+way. Written 2026-08-31, the day the ERR engine went live; updated
+2026-09-01 with the spread recorder and holiday routing. Each section
 links to the deep doc; this one is the map.
 
 **The problem in one sentence.** The US stock market is closed 48 hours
@@ -30,7 +31,7 @@ sentence of security model: every route acts on the signed-in user's own
 account, resolved server-side, never taken from a request body.
 
 Data lives in Neon Postgres (branch `development`). Decisions live in
-[DECISIONS.md](DECISIONS.md) — nineteen ADRs, each one a choice you made
+[DECISIONS.md](DECISIONS.md) — twenty-one ADRs, each one a choice you made
 with its reasons.
 
 ---
@@ -80,10 +81,11 @@ weekend token prices land from Monday's real fill. So we measure it
 ourselves (ADR-016):
 
 - **The sampler** — a GitHub Actions cron, every 5 minutes, around the
-  clock — records each of the 20 xStocks' Jupiter price beside its real
+  clock — records each of the ~20 xStocks' Jupiter price beside its real
   share's last Alpaca trade, into `token_prices`. The share price freezes
   at Friday's close all weekend *on purpose*: that staleness IS the gap
-  being measured.
+  being measured. Since Sep 1 each run also records the executable
+  bid/ask spread (§7).
 - **The backfill** pulled the past: 180 days of hourly token candles from
   GeckoTerminal (57,861 rows) and 2 years of daily share bars plus Monday
   premarket minutes from Alpaca (38,820 rows).
@@ -117,7 +119,7 @@ re-derived from the notebook after each recorded weekend — parameters are
 
 ---
 
-## 5. ★ Today: the ERR engine and the weekend simulator (ADR-019)
+## 5. ★ Aug 31: the ERR engine and the weekend simulator (ADR-019)
 
 This is the heart of the paper, now running. Built and verified live
 2026-08-31. Walkthrough with screenshots of the math:
@@ -125,7 +127,7 @@ This is the heart of the paper, now running. Built and verified live
 
 **The routing rule.** A new module, `sessions.py`, answers one question —
 *which of the five trading windows is it?* — premarket, regular,
-after-hours, overnight (Alpaca's 24/5, pending tonight's test), or the
+after-hours, overnight (Alpaca's 24/5, pending the sandbox test), or the
 **weekend**: Friday 8 PM to Sunday 8 PM ET, the 48 hours no regulated
 venue serves. Every hour has exactly one execution path, and Jupiter is
 never the path while Alpaca is. (A finding along the way: Alpaca now
@@ -225,7 +227,69 @@ currently our *only* premarket witness at 5-minute resolution.)
 
 ---
 
-## 7. What is not built yet
+## 7. ★ Sep 1: the spread recorder and holiday routing (ADR-020, ADR-021)
+
+Two builds, both racing the calendar: Labor Day weekend starts Friday
+night, and both had to be live before it.
+
+**The spread recorder — RQ2 starts collecting.** Everything recorded so
+far was the *midpoint* — the last price somebody swapped at. But nobody
+trades at the midpoint: a seller receives the bid, a buyer pays the ask,
+and the distance between them is how liquidity providers charge for risk.
+That distance is the paper's Research Question 2, and no one publishes it
+historically — so, exactly like the gap itself (ADR-016), the only way to
+have the data is to start recording before it is needed.
+
+How it works, technically: every 5-minute sampler run now asks Jupiter
+two extra questions per token — a real swap quote for ~$1,000 of USDC →
+token (the ask) and ~$1,000 of token → USDC (the bid). One fixed size for
+every token and every run, so the series is comparable across both. Five
+new columns on `token_prices`: `bid_usd`, `ask_usd`, the price impact of
+each leg, and the quote size. A failed quote loses the spread columns,
+never the price row — the same best-effort rule the Alpaca side follows.
+
+Two findings on day one:
+
+1. **Jupiter's gateway rate-limits a burst** — the first live run got
+   429s after eight quick calls. The fix is pacing: ~1 request per
+   second, spread inside and between quotes, so a run takes ~45 seconds —
+   invisible at a 5-minute cadence. (A lesson in reading an API's limits
+   from its behaviour, not its docs.)
+2. **The spread varies ~70× across tokens**: SPYx and QQQx quote at
+   0.03–0.06%, NVDAx at 0.10%, while PLTRx and INTCx cost ~2.7%. The
+   reserve model currently prices the *gap* per symbol but not the *exit
+   cost* — this series is what a future model needs to fix that.
+
+The cron picked the new code up on its own and wrote its first spread
+rows at 2:11 PM — verified unattended, which matters because it must run
+alone all weekend.
+
+**Holiday routing — the calendar gets honest.** ADR-019 knew weekdays
+from weekends but treated every Monday alike; Labor Day (Monday Sep 7)
+would have been routed "regular" while every venue was closed. Now
+`sessions.py` learns the real trading days from Alpaca's calendar
+endpoint, cached once per day. A non-trading weekday routes exactly like
+a weekend — including the subtle case: the overnight session that starts
+Sunday 8 PM trades *into* Monday, so the night before a holiday Monday is
+closed too. If the calendar cannot be fetched at all, the router falls
+back to plain weekday arithmetic, in which a holiday order harmlessly
+queues at the broker — a failure mode chosen because it is the old
+behaviour, not a new one.
+
+Net effect: **Labor Day weekend runs Friday 8 PM → Tuesday 4 AM as one
+continuous 72-hour engine window** — correct routing, and the richest
+data-collection event the project has had, with the spread recorder
+running through all of it.
+
+Also on Sep 1: the weekend-trades panel dropped its engine jargon — each
+trade now ends in one plain sentence ("The $0.16 the price moved against
+you came out of the reserve: $22.27 of $22.43 came back") — and the
+engine tests were rewired so the weekly parameter refresh can never break
+the hand-checked cash figures.
+
+---
+
+## 8. What is not built yet
 
 - **The scheduled settlement job** — settle every open weekend trade
   automatically at Monday 8:00 AM ET premarket, rolling to the 9:30
@@ -236,32 +300,28 @@ currently our *only* premarket witness at 5-minute resolution.)
   engine's window.
 - **Research questions 3–5** — simulate the paper's cascade on the
   recorded weekends, off-hours tracking, engine-ledger reconciliation.
-  (RQ2 is answered by the sampler now: since Sep 1 every run records the
-  executable bid/ask for ~$1,000 each way — ADR-020 — and the first
-  snapshot already shows the spread varying ~70× across tokens. Market
-  holidays now route to the engine via Alpaca's calendar — ADR-021 — so
-  Labor Day weekend runs as one 72-hour engine window.)
+  (RQ2's data collection is running — §7.)
 - **Azure deployment** — deliberately last (owner's call): ship when the
   app is essentially done. The checklist is in
   [PRODUCTION.md](PRODUCTION.md).
 
 ---
 
-## 8. The reading map
+## 9. The reading map
 
 | Doc | What it teaches |
 | --- | --- |
 | [YAGNUM-EXPLAINED.md](YAGNUM-EXPLAINED.md) | The concept: the problem, the hedge, the formulas, the cascade |
 | [SIZING-THE-RESERVE.md](SIZING-THE-RESERVE.md) | The statistics: σ, z, the bell curve from the ground up, where the data lives |
 | [JUPITER-FLOW.md](JUPITER-FLOW.md) | The token side: mints, decimals, quotes vs prices, the on-chain record |
-| [WEEKEND-SIMULATOR.md](WEEKEND-SIMULATOR.md) | ★ Today's build: the engine's lifecycle with real numbers, and how to drive it |
-| [DECISIONS.md](DECISIONS.md) | Every choice, numbered, with reasons — ADR-001 through ADR-019 |
+| [WEEKEND-SIMULATOR.md](WEEKEND-SIMULATOR.md) | ★ The engine's lifecycle with real numbers, and how to drive the simulator |
+| [DECISIONS.md](DECISIONS.md) | Every choice, numbered, with reasons — ADR-001 through ADR-021 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The structural reference: routes, tables, phases |
 | `docs/postman/` | Every API call, sendable by hand |
 
 ---
 
-## 9. Say it back
+## 10. Say it back
 
 1. What is the only thing the weekend simulator fakes? *(The calendar.)*
 2. A customer weekend-sells and the price falls 1% by Monday. Walk the
