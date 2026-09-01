@@ -299,8 +299,9 @@ def place_order(
                     raise HTTPException(
                         status_code=400,
                         detail=(
-                            f"shares_committed: {format(committed, 'f')} {body.symbol} are committed "
-                            f"to an open weekend trade; {format(free, 'f')} can be sold now"
+                            f"shares_committed: {format(committed, 'f')} of your {body.symbol} shares "
+                            f"are committed to a weekend trade that settles when the market reopens. "
+                            f"You can sell {format(free, 'f')} now."
                         ),
                     )
 

@@ -129,11 +129,7 @@ export async function resetBalance(
       return { status: "unavailable" };
     }
     if (result.detail?.startsWith("weekend_trades_open")) {
-      return {
-        status: "error",
-        message:
-          "You have open weekend trades. Settle them first — a reset would sell shares they have already sold.",
-      };
+      return { status: "error", message: afterPrefix(result.detail) };
     }
     // 409 means the broker has not activated the account yet — same window,
     // and same wording, as a deposit attempted right after onboarding.
@@ -226,11 +222,8 @@ export async function submitOrder(
     // the trader is the only one who can say which order they meant.
     // The shares are spoken for by an open weekend trade (ADR-022).
     if (result.detail?.startsWith("shares_committed")) {
-      return {
-        status: "error",
-        message:
-          "Some of these shares are committed to an open weekend trade and will be sold when it settles. You can sell the rest.",
-      };
+      // The API's detail already carries the counts and the symbol.
+      return { status: "error", message: afterPrefix(result.detail) };
     }
     if (result.detail === "idempotency_key_reused") {
       return {
@@ -334,7 +327,7 @@ export async function submitWeekendOrder(
       };
     }
     if (result.detail?.startsWith("insufficient_shares")) {
-      return { status: "error", message: "You don't hold that many shares to sell." };
+      return { status: "error", message: afterPrefix(result.detail) };
     }
     if (result.detail?.startsWith("insufficient_cash")) {
       return {
@@ -441,6 +434,12 @@ export async function setSimulatedWeekend(
   revalidatePath("/dashboard");
   revalidatePath("/orders");
   return { status: "set", session: result.data };
+}
+
+/** The API's message after its machine-readable `slug: ` prefix. */
+function afterPrefix(detail: string): string {
+  const text = detail.replace(/^[a-z_]+:\s*/i, "").trim();
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : detail;
 }
 
 /** Strips our API's prefix so the trader reads the broker's own words. */

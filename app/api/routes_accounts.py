@@ -145,10 +145,16 @@ def reset_account(
     with audit.audited(request, "account.reset", user_id=user_id, account_id=account_id) as entry:
         # A reset sells everything - including shares an open weekend trade
         # has already sold once (ADR-022). Settle those first.
-        if session is not None and weekend.open_trade_count(session, account_id) > 0:
+        open_trades = weekend.open_trade_count(session, account_id) if session is not None else 0
+        if open_trades > 0:
+            noun = "trade" if open_trades == 1 else "trades"
             raise HTTPException(
                 status_code=409,
-                detail="weekend_trades_open: settle your open weekend trades before resetting",
+                detail=(
+                    f"weekend_trades_open: reset is paused - you have {open_trades} open weekend "
+                    f"{noun}. Settle {'it' if open_trades == 1 else 'them'} from the trade page first; "
+                    f"a reset would sell shares {'it has' if open_trades == 1 else 'they have'} already sold."
+                ),
             )
         try:
             # Same guard and shape as POST /funding: journals (and orders)

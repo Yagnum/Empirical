@@ -97,6 +97,16 @@ export default async function SymbolPage({
   const session = weekendSession.ok ? weekendSession.data : undefined;
   const weekendMode = session?.weekend_trading === true;
   const initialTrades = weekendTrades.ok ? weekendTrades.data : undefined;
+  // Shares of this symbol already sold on a weekend and awaiting settlement
+  // (ADR-022): the regular ticket says so before anyone tries to sell them.
+  const committedQty = (initialTrades ?? [])
+    .filter(
+      (trade) =>
+        trade.symbol === symbol &&
+        trade.side === "sell" &&
+        (trade.state === "provisional" || trade.state === "awaiting_settlement"),
+    )
+    .reduce((sum, trade) => sum + Number(trade.qty), 0);
   // Most symbols have no xStock (404 "no_token"), and a Jupiter outage (502)
   // is not worth a panel either: the panel exists only when there is a token
   // price to show, so pages without one keep exactly their old layout. The
@@ -184,6 +194,7 @@ export default async function SymbolPage({
                   buyingPower={account.data.buying_power}
                   initialQuote={initialQuote}
                   initialClock={initialClock}
+                  committedQty={committedQty}
                 />
               )}
             </Panel>

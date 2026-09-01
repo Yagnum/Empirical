@@ -219,12 +219,14 @@ def _check_sell_shares(session: Session, account_id: str, symbol: str, qty: Deci
         raise HTTPException(
             status_code=400,
             detail=(
-                f"insufficient_shares: {format(free, 'f')} {symbol} sellable - "
-                f"{format(committed, 'f')} already committed to an open weekend trade"
+                f"insufficient_shares: {format(committed, 'f')} of your {symbol} shares are already "
+                f"committed to a weekend trade that settles when the market reopens. "
+                f"You can sell {format(free, 'f')} more now."
             ),
         )
     raise HTTPException(
-        status_code=400, detail=f"insufficient_shares: you hold {format(free, 'f')} {symbol} available"
+        status_code=400,
+        detail=f"insufficient_shares: you hold {format(free, 'f')} {symbol} available to sell",
     )
 
 

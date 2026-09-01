@@ -72,6 +72,8 @@ type TicketProps = {
   buyingPower: string | null;
   initialQuote?: Quote;
   initialClock?: MarketClock;
+  /** Shares already sold on a weekend and awaiting settlement (ADR-022). */
+  committedQty?: number;
 };
 
 export function OrderTicket(props: TicketProps) {
@@ -92,6 +94,7 @@ function TicketForm({
   buyingPower,
   initialQuote,
   initialClock,
+  committedQty = 0,
   onNewSlip,
 }: TicketProps & { onNewSlip: () => void }) {
   const clock = useMarketClock(initialClock);
@@ -255,6 +258,15 @@ function TicketForm({
           <legend className="sr-only">New order for {symbol}</legend>
 
           <SideToggle side={side} onChange={setSide} />
+
+          {side === "sell" && committedQty > 0 ? (
+            <p className="mt-4 rounded-control border border-stamp-rule bg-stamp-wash px-3.5 py-2.5 text-[12px] leading-relaxed text-stamp">
+              {committedQty} of your {symbol} shares{" "}
+              {committedQty === 1 ? "is" : "are"} committed to a weekend trade
+              and will be sold when the market reopens. Only the rest can be
+              sold here.
+            </p>
+          ) : null}
 
           <div className="mt-6">
             <label
