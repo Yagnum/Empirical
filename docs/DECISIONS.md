@@ -637,3 +637,41 @@ concrete — a 72-hour dead zone the engine would have misrouted.
 **Consequences**: Labor Day weekend runs Friday 8 PM → Tuesday 4 AM as one
 continuous engine window, and the first scheduled-settlement run lands
 Tuesday 2026-09-08 — with real 72-hour gap data behind it.
+
+---
+
+## ADR-022 — Custody of weekend-sold shares: a ledger lock, because the sandbox cannot journal securities
+
+**Date**: 2026-09-01 · **Status**: Accepted
+
+**Context**: Between a Saturday sell and Monday's settlement, the trader
+holds both the advance *and* the shares the engine will sell. Nothing
+stopped them selling those shares themselves first, leaving Yagnum with
+cash advanced against a share that was gone. The clean fix is Alpaca's
+securities journal (JNLS): move the share into a Yagnum account on
+Saturday, the way the cash moves to the trader. Tested live 2026-09-01:
+`customer-to-customer JNLS not enabled`, `customer-to-firm JNLS not
+enabled` — a correspondent entitlement Alpaca must switch on, in both
+directions, and not one a sandbox can grant itself. A dedicated engine
+trading account was created for the purpose (`weekend-engine@yagnum.app`,
+`6cbc0608…`, ACTIVE, empty) and stands ready for the day JNLS is enabled.
+
+**Decision**:
+- **The engine keeps a ledger lock.** `committed_shares(account, symbol)`
+  = the quantity in open (`provisional`, `awaiting_settlement`) weekend
+  sells. Every path that could sell those shares subtracts it first: a
+  second weekend sell, the regular order ticket (`400 shares_committed`),
+  and reset-balance (`409 weekend_trades_open`). Since Yagnum's app is the
+  trader's only route to the broker, the lock is complete in practice.
+- **Settlement still sells from the trader's account**, as today.
+- **Residual risk, named**: a trader who reaches the broker outside the
+  app could still sell committed shares; the engine's settlement would
+  then fail with an event, and the advance becomes a debit owed. Accepted
+  for a sandbox; **production must request JNLS enablement from Alpaca**
+  and switch to true custody (the seam is `_check_sell_shares` and
+  `_place_hedge`; the engine account already exists).
+
+**Consequences**: The Saturday trade now behaves like a sale even though
+the share has not physically moved. The production checklist gains one
+line. A future ADR moves custody to the engine account once Alpaca allows
+it; nothing in the trade's arithmetic changes when that happens.

@@ -60,3 +60,11 @@ the safety nets, so each removal must be deliberate.
 - [ ] Check that the paper-trading banner and the "not a broker-dealer"
       footer render on every page. They are the honesty layer; the app
       must never look like it handles real money.
+
+## Weekend engine (ADR-022)
+
+- **Ask Alpaca to enable securities journals (JNLS) customer ↔ firm** for
+  the correspondent. Until then the engine protects weekend-sold shares
+  with a ledger lock inside the app; with JNLS enabled, custody moves to
+  the engine account (`ALPACA_ENGINE_ACCOUNT_ID`, created 2026-09-01) and
+  the lock becomes physical.

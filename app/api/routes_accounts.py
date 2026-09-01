@@ -8,11 +8,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
 
 import alpaca
 import audit
 import clerk_auth
+import db
 import offboarding
+import weekend
 from config import settings
 
 router = APIRouter(tags=["accounts"])
@@ -114,6 +117,7 @@ def reset_account(
     request: Request,
     user_id: str = Depends(clerk_auth.require_user_id),
     account_id: str = Depends(clerk_auth.require_account_id),
+    session: Session | None = Depends(db.get_session),
 ) -> dict:
     """Sell everything, return the cash, leave the account at $0 (ADR-015).
 
@@ -139,6 +143,13 @@ def reset_account(
     Audited (ADR-014): a reset moves money and destroys positions.
     """
     with audit.audited(request, "account.reset", user_id=user_id, account_id=account_id) as entry:
+        # A reset sells everything - including shares an open weekend trade
+        # has already sold once (ADR-022). Settle those first.
+        if session is not None and weekend.open_trade_count(session, account_id) > 0:
+            raise HTTPException(
+                status_code=409,
+                detail="weekend_trades_open: settle your open weekend trades before resetting",
+            )
         try:
             # Same guard and shape as POST /funding: journals (and orders)
             # bounce off a not-yet-ACTIVE account with a bare 422, so name

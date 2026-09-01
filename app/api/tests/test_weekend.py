@@ -350,6 +350,63 @@ def test_fractional_weekend_orders_are_refused(db_client, broker):
 
 
 # ---------------------------------------------------------------------------
+# The ledger lock (ADR-022): weekend-sold shares cannot be sold again
+# ---------------------------------------------------------------------------
+
+
+def test_committed_shares_cannot_be_weekend_sold_twice(db_client, broker):
+    broker.positions = [{"symbol": "NVDA", "qty": "2", "qty_available": "2"}]
+    _open_sell(db_client, qty="2")
+    # The broker still shows 2 available - they have not moved - but the
+    # engine has spoken for them.
+    response = db_client.post(
+        "/weekend/orders", json={"symbol": "NVDA", "side": "sell", "qty": "1"}
+    )
+    assert response.status_code == 400
+    assert "already committed" in response.json()["detail"]
+
+
+def test_regular_ticket_refuses_committed_shares(db_client, broker):
+    broker.positions = [{"symbol": "NVDA", "qty": "2", "qty_available": "2"}]
+    _open_sell(db_client, qty="2")
+    response = db_client.post(
+        "/orders", json={"symbol": "NVDA", "qty": "1", "side": "sell", "type": "market"}
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"].startswith("shares_committed")
+    # Nothing reached the broker.
+    assert broker.orders == []
+
+
+def test_regular_ticket_allows_the_uncommitted_remainder(db_client, broker):
+    broker.positions = [{"symbol": "NVDA", "qty": "3", "qty_available": "3"}]
+    _open_sell(db_client, qty="2")
+    response = db_client.post(
+        "/orders", json={"symbol": "NVDA", "qty": "1", "side": "sell", "type": "market"}
+    )
+    assert response.status_code == 200, response.text
+    assert len(broker.orders) == 1
+
+
+def test_settled_trades_release_the_lock(db_client, broker):
+    broker.positions = [{"symbol": "NVDA", "qty": "2", "qty_available": "2"}]
+    trade = _open_sell(db_client, qty="2")
+    db_client.post(f"/weekend/orders/{trade['id']}/settle", json={"mode": "injected", "gap": "0"})
+    # Injected mode never sold the shares, so they are genuinely free again.
+    response = db_client.post(
+        "/orders", json={"symbol": "NVDA", "qty": "2", "side": "sell", "type": "market"}
+    )
+    assert response.status_code == 200, response.text
+
+
+def test_reset_waits_for_open_weekend_trades(db_client, broker):
+    _open_sell(db_client)
+    response = db_client.post("/accounts/reset")
+    assert response.status_code == 409
+    assert "weekend_trades_open" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
 # Settlement: injected gaps (the dev knob)
 # ---------------------------------------------------------------------------
 

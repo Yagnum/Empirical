@@ -301,6 +301,10 @@ the hand-checked cash figures.
 - **Research questions 3–5** — simulate the paper's cascade on the
   recorded weekends, off-hours tracking, engine-ledger reconciliation.
   (RQ2's data collection is running — §7.)
+- **Physical custody of weekend-sold shares** — the sandbox cannot journal
+  securities (both JNLS directions "not enabled"), so the engine holds a
+  ledger lock instead (ADR-022). Production asks Alpaca to enable JNLS and
+  moves custody to the engine account that already exists.
 - **Azure deployment** — deliberately last (owner's call): ship when the
   app is essentially done. The checklist is in
   [PRODUCTION.md](PRODUCTION.md).

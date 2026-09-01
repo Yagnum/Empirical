@@ -38,6 +38,7 @@ import alpaca
 import audit
 import clerk_auth
 import db
+import weekend
 from models import OrderIntent
 
 router = APIRouter(tags=["orders"])
@@ -285,6 +286,23 @@ def place_order(
             # Honouring the header needs somewhere to write the key. Rather
             # than pretend, say so in the audit trail and place the order.
             entry.detail = f"{entry.detail} (idempotency-key ignored: no database)"
+
+        # Shares committed to an open weekend trade are spoken for (ADR-022):
+        # the engine will sell them at settlement, so they cannot be sold
+        # here first. The ledger query is local and cheap; the broker's
+        # position is only consulted when something is actually committed.
+        if body.side == "sell" and session is not None:
+            committed = weekend.committed_shares(session, account_id, body.symbol)
+            if committed > 0:
+                free = weekend.sellable_shares(account_id, body.symbol, committed)
+                if free < body.qty:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"shares_committed: {format(committed, 'f')} {body.symbol} are committed "
+                            f"to an open weekend trade; {format(free, 'f')} can be sold now"
+                        ),
+                    )
 
         try:
             order = alpaca.create_order(account_id, body.to_alpaca())

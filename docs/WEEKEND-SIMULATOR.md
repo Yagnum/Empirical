@@ -72,7 +72,10 @@ weekend, account `0ac3…`):
    - **advance**: $439.97 from the firm to you — *you sold now, you are
      paid now*. This immediacy is the product.
 
-   State: `provisional`. Net cash to you at this moment: $395.11.
+   State: `provisional`. Net cash to you at this moment: $395.11. Your 2
+   shares stay in your account but are **committed** (ADR-022): the
+   regular ticket, a second weekend sell, and reset-balance all refuse to
+   touch them until the engine sells them Monday.
 
 **Settle — the market reopens (in the simulator: it never closed).**
 

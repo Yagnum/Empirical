@@ -160,8 +160,9 @@ function Outcome({ trade }: { trade: WeekendTrade }) {
   if (trade.state === "provisional") {
     return (
       <>
-        Your price is locked and{" "}
-        {trade.side === "sell" ? "the cash is in your account" : "paid"}.{" "}
+        {trade.side === "sell"
+          ? "The cash is in your account and the shares are set aside — they sell for real when the market reopens."
+          : "Your price is locked and paid."}{" "}
         The {reserve} reserve waits for the market to reopen.
       </>
     );

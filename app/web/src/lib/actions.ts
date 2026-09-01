@@ -128,6 +128,13 @@ export async function resetBalance(
     if (result.failure === "unavailable") {
       return { status: "unavailable" };
     }
+    if (result.detail?.startsWith("weekend_trades_open")) {
+      return {
+        status: "error",
+        message:
+          "You have open weekend trades. Settle them first — a reset would sell shares they have already sold.",
+      };
+    }
     // 409 means the broker has not activated the account yet — same window,
     // and same wording, as a deposit attempted right after onboarding.
     const message =
@@ -217,6 +224,14 @@ export async function submitOrder(
     }
     // The key was already spent on a different order. Nothing was placed, and
     // the trader is the only one who can say which order they meant.
+    // The shares are spoken for by an open weekend trade (ADR-022).
+    if (result.detail?.startsWith("shares_committed")) {
+      return {
+        status: "error",
+        message:
+          "Some of these shares are committed to an open weekend trade and will be sold when it settles. You can sell the rest.",
+      };
+    }
     if (result.detail === "idempotency_key_reused") {
       return {
         status: "error",

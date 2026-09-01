@@ -49,7 +49,7 @@ import time
 from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 import alpaca
@@ -165,7 +165,40 @@ def price_trade(symbol: str, side: str, qty: Decimal) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _check_sell_shares(account_id: str, symbol: str, qty: Decimal) -> None:
+OPEN_STATES = ("provisional", "awaiting_settlement")
+
+
+def committed_shares(session: Session, account_id: str, symbol: str) -> Decimal:
+    """Shares this account has weekend-sold but not yet settled (ADR-022).
+
+    They are still in the brokerage account - the sandbox cannot journal
+    securities - so the engine keeps this ledger lock instead: every path
+    that could sell them again (the regular ticket, a second weekend sell,
+    reset-balance) subtracts this figure first.
+    """
+    total = session.execute(
+        select(func.coalesce(func.sum(WeekendTrade.qty), 0)).where(
+            WeekendTrade.alpaca_account_id == account_id,
+            WeekendTrade.symbol == symbol.upper(),
+            WeekendTrade.side == "sell",
+            WeekendTrade.state.in_(OPEN_STATES),
+        )
+    ).scalar_one()
+    return Decimal(str(total))
+
+
+def open_trade_count(session: Session, account_id: str) -> int:
+    return session.execute(
+        select(func.count()).select_from(WeekendTrade).where(
+            WeekendTrade.alpaca_account_id == account_id,
+            WeekendTrade.state.in_(OPEN_STATES),
+        )
+    ).scalar_one()
+
+
+def sellable_shares(account_id: str, symbol: str, committed: Decimal) -> Decimal:
+    """What the account can still sell: the broker's available figure minus
+    the shares already committed to open weekend trades."""
     try:
         positions = alpaca.list_positions(account_id)
     except alpaca.AlpacaError as exc:
@@ -173,13 +206,26 @@ def _check_sell_shares(account_id: str, symbol: str, qty: Decimal) -> None:
     for position in positions:
         if str(position.get("symbol", "")).upper() == symbol:
             available = Decimal(str(position.get("qty_available") or position.get("qty") or "0"))
-            if available >= qty:
-                return
-            raise HTTPException(
-                status_code=400,
-                detail=f"insufficient_shares: you hold {format(available, 'f')} {symbol} available",
-            )
-    raise HTTPException(status_code=400, detail=f"insufficient_shares: no {symbol} position")
+            return max(available - committed, Decimal("0"))
+    return Decimal("0")
+
+
+def _check_sell_shares(session: Session, account_id: str, symbol: str, qty: Decimal) -> None:
+    committed = committed_shares(session, account_id, symbol)
+    free = sellable_shares(account_id, symbol, committed)
+    if free >= qty:
+        return
+    if committed > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"insufficient_shares: {format(free, 'f')} {symbol} sellable - "
+                f"{format(committed, 'f')} already committed to an open weekend trade"
+            ),
+        )
+    raise HTTPException(
+        status_code=400, detail=f"insufficient_shares: you hold {format(free, 'f')} {symbol} available"
+    )
 
 
 def _check_buy_cash(account_id: str, needed: Decimal) -> None:
@@ -213,7 +259,7 @@ def open_trade(
     notional = _money(qty * p_open)
 
     if side == "sell":
-        _check_sell_shares(account_id, symbol.upper(), qty)
+        _check_sell_shares(session, account_id, symbol.upper(), qty)
     else:
         _check_buy_cash(account_id, notional + sizing["reserve"])
 
