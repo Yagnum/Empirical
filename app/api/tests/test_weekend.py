@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 import alpaca
+import db
 import err
 import jupiter
 import sessions
@@ -534,6 +535,58 @@ def test_settling_a_settled_trade_conflicts(db_client, broker):
         f"/weekend/orders/{trade['id']}/settle", json={"mode": "injected", "gap": "0"}
     )
     assert response.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# The scheduled settlement (ADR-023)
+# ---------------------------------------------------------------------------
+
+
+def test_settle_all_open_settles_every_open_trade(db_client, broker, monkeypatch):
+    broker.positions = [{"symbol": "NVDA", "qty": "5", "qty_available": "5"}]
+    first = _open_sell(db_client, qty="2")
+    second = _open_sell(db_client, qty="1")
+    monkeypatch.setattr(sessions, "scheduled_session", lambda now=None, **_: sessions.REGULAR)
+
+    with db.session_scope() as session:
+        summary = weekend.settle_all_open(session)
+
+    assert summary["settled"] == 2 and summary["failed"] == 0
+    assert len(broker.orders) == 2
+    for trade_id in (first["id"], second["id"]):
+        assert db_client.get(f"/weekend/orders/{trade_id}").json()["state"] == "settled"
+
+
+def test_settle_all_open_does_nothing_on_a_weekend(db_client, broker, monkeypatch):
+    _open_sell(db_client)
+    monkeypatch.setattr(sessions, "scheduled_session", lambda now=None, **_: sessions.WEEKEND)
+    with db.session_scope() as session:
+        summary = weekend.settle_all_open(session)
+    assert summary == {"settled": 0, "breached": 0, "awaiting": 0, "failed": 0,
+                       "log": ["no regulated session open; nothing settled"]}
+    assert broker.orders == []
+
+
+def test_settle_all_open_survives_one_refusal(db_client, broker, monkeypatch):
+    broker.positions = [{"symbol": "NVDA", "qty": "5", "qty_available": "5"}]
+    _open_sell(db_client, qty="1")
+    _open_sell(db_client, qty="1")
+    monkeypatch.setattr(sessions, "scheduled_session", lambda now=None, **_: sessions.REGULAR)
+
+    calls = {"n": 0}
+    real_create = broker._create_order
+
+    def flaky(account_id, payload):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise alpaca.AlpacaError("insufficient qty", status_code=403)
+        return real_create(account_id, payload)
+
+    monkeypatch.setattr(alpaca, "create_order", flaky)
+    with db.session_scope() as session:
+        summary = weekend.settle_all_open(session)
+    assert summary["failed"] == 1 and summary["settled"] == 1
+    assert any("failed" in line for line in summary["log"])
 
 
 # ---------------------------------------------------------------------------

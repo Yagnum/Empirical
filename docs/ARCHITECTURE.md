@@ -152,7 +152,9 @@ trades; every step is an event row carrying its Alpaca journal or order id),
 `POST /weekend/orders/{id}/settle` (advance a trade: `mode=market` places the
 real hedge, dev-only `mode=injected` settles at a chosen gap), and
 `POST /dev/clock` (development only — the simulated-weekend switch; 404 in
-production). `POST /orders` gains `extended_hours` for the 4–9:30 AM and
+production). Settlement runs unattended from
+`.github/workflows/settle-weekend.yml` (ADR-023) via
+`scripts/settle_weekend.py`. `POST /orders` gains `extended_hours` for the 4–9:30 AM and
 4–8 PM sessions. Tables `weekend_trades` + `weekend_trade_events`; reserve
 parameters in `app/api/research_params.json` (ADR-018). The walkthrough
 lives in `docs/WEEKEND-SIMULATOR.md`.

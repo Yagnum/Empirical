@@ -675,3 +675,40 @@ trading account was created for the purpose (`weekend-engine@yagnum.app`,
 the share has not physically moved. The production checklist gains one
 line. A future ADR moves custody to the engine account once Alpaca allows
 it; nothing in the trade's arithmetic changes when that happens.
+
+---
+
+## ADR-023 — The settlement job: a weekday-morning cron, idempotent, from 8:00 AM ET
+
+**Date**: 2026-09-01 · **Status**: Accepted
+
+**Context**: ADR-019 decided that a scheduled job settles weekend trades
+and that the hedge closes at Monday 8:00 AM ET premarket, rolling into the
+9:30 auction. Until now settlement was a button. The first real run will
+be Tuesday 2026-09-08, after Labor Day.
+
+**Decision**:
+- **`weekend.settle_all_open`** is the job's body: every open trade, any
+  account, `mode=market`, oldest first. One trade's refusal is recorded on
+  its event trail and counted; the loop continues.
+- **A GitHub Actions cron runs it every ten minutes, 12:00–15:50 UTC,
+  Monday–Friday** (8:00–11:50 AM EDT; 7:00–10:50 AM EST — both inside
+  premarket or the regular session). Same infrastructure and secrets as
+  the sampler (ADR-016); the job places sandbox orders and moves sandbox
+  cash, so it is pinned to the `Yagnum` repository owner and never runs
+  from a fork.
+- **Idempotent by construction**: a trade still `awaiting_settlement`
+  has its order checked again; a settled one is skipped; a weekend or
+  holiday run finds no session (ADR-021) and exits. Running it by hand
+  (`scripts/settle_weekend.py --write`) or from the button is the same
+  code path.
+- **Rolling to the auction is the day order itself**: an extended-hours
+  day limit works through premarket, the open, and the regular session.
+  Known limit: the limit price is set from the last trade at placement,
+  so a price that gaps below it by 9:30 leaves the order unfilled until
+  it expires at the close; the trade then returns to `provisional` and
+  the next morning's run re-prices it.
+
+**Consequences**: A weekend trade now completes with zero clicks. The
+job's log is the first record of real premarket execution quality —
+fill times and prices from our own orders, which no free feed gives us.

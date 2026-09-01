@@ -586,6 +586,48 @@ def settle(
 # ---------------------------------------------------------------------------
 
 
+def list_open_trades(session: Session) -> list[WeekendTrade]:
+    """Every trade, any account, that still needs the market: oldest first."""
+    rows = session.execute(
+        select(WeekendTrade)
+        .where(WeekendTrade.state.in_(OPEN_STATES))
+        .order_by(WeekendTrade.id)
+    )
+    return [trade for (trade,) in rows]
+
+
+def settle_all_open(session: Session) -> dict:
+    """The scheduled settlement (ADR-023): every open trade, mode=market.
+
+    One trade's failure never stops the next: the broker refusing one hedge
+    is recorded on that trade's event trail and counted, and the loop moves
+    on. Returns a tally plus one log line per trade for the job's output.
+    """
+    summary: dict = {"settled": 0, "breached": 0, "awaiting": 0, "failed": 0, "log": []}
+    if sessions.scheduled_session() == sessions.WEEKEND:
+        summary["log"].append("no regulated session open; nothing settled")
+        return summary
+    for trade in list_open_trades(session):
+        label = f"#{trade.id} {trade.side} {_fmt(trade.qty)} {trade.symbol}"
+        try:
+            trade = settle(session, trade, mode="market")
+        except HTTPException as exc:
+            summary["failed"] += 1
+            summary["log"].append(f"{label}: failed - {exc.detail}")
+            continue
+        if trade.state in ("settled", "breached"):
+            summary[trade.state] += 1
+            summary["log"].append(
+                f"{label}: {trade.state} at {_fmt(_money(trade.p_close))}, "
+                f"reserve back {_fmt(trade.escrow_returned or Decimal('0'))}"
+                + (f", shortfall {_fmt(trade.shortfall)}" if trade.shortfall else "")
+            )
+        else:
+            summary["awaiting"] += 1
+            summary["log"].append(f"{label}: hedge {trade.hedge_order_id} still working")
+    return summary
+
+
 def list_trades(session: Session, account_id: str, limit: int = 50) -> list[WeekendTrade]:
     rows = session.execute(
         select(WeekendTrade)

@@ -1,0 +1,47 @@
+# Settle open weekend trades into the first regulated session (ADR-023).
+#
+# Every ten minutes from 8:00 AM ET on weekday mornings the engine places
+# the hedge for each open weekend trade (a marketable limit in premarket,
+# rolling into the 9:30 auction as a day order) and reconciles the fills.
+# Idempotent: a trade still waiting on its order is simply checked again;
+# a holiday or weekend run finds no session and exits.
+#
+# The cron is UTC. 12:00-15:50 UTC is 8:00-11:50 AM during Eastern Daylight
+# Time and 7:00-10:50 AM in Eastern Standard Time - both inside premarket or
+# the regular session, which is all the job needs; the session router in
+# sessions.py decides what kind of order fits the moment.
+#
+# Secrets: the same DATABASE_URL, ALPACA_BROKER_ID and ALPACA_BROKER_SECRET
+# the sampler uses. This job DOES place orders and move cash - in the
+# sandbox - which is why it never runs from a fork or a pull request.
+name: Settle weekend trades
+
+on:
+  schedule:
+    - cron: "2-52/10 12-15 * * 1-5"
+  workflow_dispatch:
+
+concurrency:
+  group: settle-weekend
+  cancel-in-progress: false
+
+jobs:
+  settle:
+    if: github.repository_owner == 'Yagnum'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --no-dev
+      - run: uv run python scripts/settle_weekend.py --write
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ALPACA_BROKER_ID: ${{ secrets.ALPACA_BROKER_ID }}
+          ALPACA_BROKER_SECRET: ${{ secrets.ALPACA_BROKER_SECRET }}
+          ALPACA_FIRM_ACCOUNT_ID: ${{ secrets.ALPACA_FIRM_ACCOUNT_ID }}

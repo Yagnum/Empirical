@@ -185,10 +185,10 @@ modes, the breach path, and the production guards; 178 pass in total.
 
 **Is the real flow live?** Yes — on a real weekend the same code runs with
 no toggle: the calendar alone activates the weekend ticket and the engine.
-One piece is still manual: settlement fires when you (or an API call)
-press settle, not yet by itself at Monday 8:00 AM. The scheduled
-settlement job is the next build item; until then, Monday-morning
-settlement is one click.
+Settlement is automatic as of Sep 1 (ADR-023): a weekday-morning cron
+runs `settle_all_open` every ten minutes from 8:00 AM ET, placing each
+hedge as a premarket limit that rolls into the 9:30 auction. The Settle
+button remains for the simulator and for hand-driving a trade.
 
 ---
 
@@ -291,10 +291,6 @@ the hand-checked cash figures.
 
 ## 8. What is not built yet
 
-- **The scheduled settlement job** — settle every open weekend trade
-  automatically at Monday 8:00 AM ET premarket, rolling to the 9:30
-  auction. The engine's settle function is the job's body; the trigger is
-  the missing piece.
 - **The overnight verdict** — tonight's 8:05 PM sandbox test decides
   whether Alpaca's 24/5 session works for us, or those hours join the
   engine's window.

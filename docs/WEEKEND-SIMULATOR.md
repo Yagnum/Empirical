@@ -78,6 +78,8 @@ weekend, account `0ac3…`):
    touch them until the engine sells them Monday.
 
 **Settle — the market reopens (in the simulator: it never closed).**
+On a real Monday this runs by itself: the settlement cron (ADR-023) fires
+every ten minutes from 8:00 AM ET. In the simulator you press the button.
 
 4. The engine sells your 2 real shares at the broker. Fill: **$219.76** —
    the first regulated price, `p_close`.
