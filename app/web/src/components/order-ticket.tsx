@@ -18,7 +18,9 @@ import { PaperTradingStamp } from "@/components/paper-trading";
 import { Segmented } from "@/components/segmented";
 import { submitOrder, type SubmitOrderState } from "@/lib/actions";
 import {
+  PLACED_ORDER_INTERVAL,
   PNL_PREVIEW_STALE,
+  fetchOrder,
   fetchPnlPreview,
   isLedgerUnavailable,
   keys,
@@ -29,6 +31,7 @@ import {
   estimateNotional,
   newIdempotencyKey,
   orderStatusLabel,
+  orderStatusTone,
   type OrderDraft,
 } from "@/lib/orders";
 import { formatQty, formatUsd, toNumber } from "@/lib/money";
@@ -728,33 +731,98 @@ function Review({
   );
 }
 
+/**
+ * The stub after you hand the slip in - and it keeps watching.
+ *
+ * A sandbox fill lands within seconds, and the honest place to show it is
+ * here, where the trader is already looking, not a page away. The card polls
+ * the one order it placed until the broker reaches a final state, then stops:
+ * filled turns the status green with a check and names the price; canceled
+ * or rejected says so plainly. While it works, the Orders page is still the
+ * place to cancel it.
+ */
 function OrderPlaced({
-  order,
+  order: placed,
   onNewSlip,
 }: {
   order: Order;
   onNewSlip: () => void;
 }) {
+  const queryClient = useQueryClient();
+  const live = useQuery({
+    queryKey: keys.order(placed.id),
+    queryFn: ({ signal }) => fetchOrder(placed.id, signal),
+    initialData: placed,
+    refetchInterval: (query) =>
+      orderStatusTone(query.state.data?.status ?? placed.status) === "working"
+        ? PLACED_ORDER_INTERVAL
+        : false,
+  });
+  const order = live.data ?? placed;
+  const tone = orderStatusTone(order.status);
+
+  // A fill changes positions, buying power, and the cost basis the sell
+  // ticket estimates from; drop every cached answer that mentions them.
+  useEffect(() => {
+    if (tone === "filled") {
+      void queryClient.invalidateQueries({ queryKey: ["orders"] });
+      void queryClient.invalidateQueries({ queryKey: ["positions"] });
+      void queryClient.invalidateQueries({ queryKey: ["pnl-preview"] });
+    }
+  }, [tone, queryClient]);
+
+  const verb =
+    tone === "filled"
+      ? order.side === "buy"
+        ? "Bought"
+        : "Sold"
+      : order.side === "buy"
+        ? "Buy"
+        : "Sell";
+  const shares = formatQty(tone === "filled" ? order.filled_qty : order.qty);
+
   return (
     <div className="px-6 py-7">
-      <p className="stat-label">Order placed</p>
+      <p className="stat-label">
+        {tone === "filled"
+          ? "Order filled"
+          : tone === "working"
+            ? "Order placed"
+            : tone === "refused"
+              ? "Order rejected"
+              : "Order ended"}
+      </p>
       <p className="mt-3 font-display text-[1.5rem] leading-tight font-bold tracking-[-0.02em] text-ink">
-        {order.side === "buy" ? "Buy" : "Sell"}{" "}
-        <span className="figure-nums">{formatQty(order.qty)}</span>{" "}
-        {order.symbol}
+        {verb} <span className="figure-nums">{shares}</span> {order.symbol}
+        {tone === "filled" && order.filled_avg_price ? (
+          <>
+            {" "}
+            <span className="text-ink-soft">at</span>{" "}
+            <span className="figure-nums">{formatUsd(order.filled_avg_price)}</span>
+          </>
+        ) : null}
       </p>
       <p className="mt-3 text-[14px] leading-relaxed text-ink-soft">
-        {order.type === "limit"
-          ? "The broker has your order. It fills if the market reaches your price."
-          : "The broker has your order. It fills at the next available price once trading is open."}{" "}
-        Follow it, or cancel it, from Orders.
+        {tone === "filled"
+          ? "Done. Your positions and buying power are updated."
+          : tone === "working"
+            ? (order.type === "limit"
+                ? "The broker has your order. It fills if the market reaches your price."
+                : "The broker has your order. It fills at the next available price once trading is open.") +
+              " This card updates by itself; cancel it from Orders if you change your mind."
+            : tone === "refused"
+              ? "The broker refused this order. Nothing changed."
+              : "This order ended without filling. Nothing changed."}
       </p>
 
       <dl className="mt-6 border-t border-rule-soft pt-4 text-[13px]">
-        <Line term="Status" value={orderStatusLabel(order.status)} />
+        <StatusLine order={order} tone={tone} />
         <Line term="Type" value={order.type === "limit" ? "Limit" : "Market"} />
         {order.limit_price ? (
           <Line term="Limit price" value={formatUsd(order.limit_price)} />
+        ) : null}
+        {tone === "filled" && order.filled_avg_price ? (
+          <Line term="Filled at" value={formatUsd(order.filled_avg_price)} strong />
         ) : null}
       </dl>
 
@@ -774,6 +842,59 @@ function OrderPlaced({
           Place another order
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The status row of the placed card. Green with a check once filled; a
+ * quiet pulse while the broker still holds it; red words if it was refused.
+ * The words carry the state, the colour only agrees with them.
+ */
+function StatusLine({
+  order,
+  tone,
+}: {
+  order: Order;
+  tone: ReturnType<typeof orderStatusTone>;
+}) {
+  const label = orderStatusLabel(order.status);
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-1.5">
+      <dt className="text-ink-soft">Status</dt>
+      <dd
+        aria-live="polite"
+        className={`inline-flex items-center gap-1.5 font-medium ${
+          tone === "filled"
+            ? "text-gain"
+            : tone === "refused"
+              ? "text-loss"
+              : tone === "working"
+                ? "text-ink"
+                : "text-ink-soft"
+        }`}
+      >
+        {tone === "filled" ? (
+          <svg
+            aria-hidden
+            viewBox="0 0 16 16"
+            className="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3 8.5l3.2 3.2L13 5" />
+          </svg>
+        ) : tone === "working" ? (
+          <span
+            aria-hidden
+            className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"
+          />
+        ) : null}
+        <span>{tone === "filled" ? "Filled" : label}</span>
+      </dd>
     </div>
   );
 }

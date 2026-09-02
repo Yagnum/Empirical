@@ -172,12 +172,17 @@ marketable limit at $216.34 with `extended_hours`, filled at $217.46,
 reconciled to `settled`. The sandbox honours the 4–8 PM window and fills
 at the market, not the floor.
 
-**8:05 PM ET — overnight (the ADR-019 blocker).** Place a 1-share limit
-order after 8 PM. Alpaca's 24/5 session needs enablement by their team on
-real accounts; the sandbox may (a) fill it via Blue Ocean, (b) queue it to
-tomorrow 4 AM, or (c) reject it. Whichever happens decides the routing
-table's overnight row: Alpaca if it works, otherwise the weekend engine's
-window grows by those hours until it does.
+**Overnight — answered Tue Sep 1, 8:05 PM ET: not available here.** Two
+1-share limit buys at $218.52 (last trade $217.43), one with
+`extended_hours=true` and one plain, were both *accepted* by the sandbox
+and then sat unfilled for 90 seconds — status `accepted`, zero filled —
+before being cancelled. The sandbox never rejected them, but it never
+executed them either: consistent with Alpaca's docs, which say the 24/5
+session needs enablement by their team, and with the free data feed
+carrying no overnight prints to fill against. Verdict for the routing
+table: **8 PM–4 AM has no execution path in this sandbox.** An order
+placed then simply queues until 4:00 AM premarket. Whether those hours
+should join the weekend engine's window is an open owner decision.
 
 ---
 

@@ -111,6 +111,10 @@ export const fetchOrders = (
   signal?: AbortSignal,
 ) => get<Order[]>("orders", { status, limit: 50 }, signal);
 
+/** One order by id - the placed card follows it until it fills or dies. */
+export const fetchOrder = (id: string, signal?: AbortSignal) =>
+  get<Order>("orders/" + encodeURIComponent(id), {}, signal);
+
 /*
   Polled only while a reset is liquidating: an empty list is the signal that
   the account is flat and the cash return can be asked for.
@@ -195,6 +199,7 @@ export const keys = {
   token: (symbol: string) => ["token", symbol] as const,
   assets: (q: string) => ["assets", q] as const,
   orders: (status: string) => ["orders", status] as const,
+  order: (id: string) => ["order", id] as const,
   positions: ["positions"] as const,
   portfolio: (period: string, timeframe: string) =>
     ["portfolio", period, timeframe] as const,
@@ -218,6 +223,12 @@ export const keys = {
 export const QUOTE_INTERVAL_OPEN = 5_000;
 export const QUOTE_INTERVAL_CLOSED = 30_000;
 export const ORDERS_INTERVAL = 10_000;
+/*
+  The card that follows a just-placed order: a fill in the sandbox lands
+  within seconds, so three seconds keeps the moment honest without hammering
+  the broker; polling stops the instant the order reaches a final state.
+*/
+export const PLACED_ORDER_INTERVAL = 3_000;
 /*
   The token price is a reference figure, not something anyone trades on here,
   and the sampler behind ADR-016 records it every five minutes. It is only
