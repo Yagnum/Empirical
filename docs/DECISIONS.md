@@ -712,3 +712,32 @@ be Tuesday 2026-09-08, after Labor Day.
 **Consequences**: A weekend trade now completes with zero clicks. The
 job's log is the first record of real premarket execution quality —
 fill times and prices from our own orders, which no free feed gives us.
+
+---
+
+## ADR-024 — Overnight hours queue at the broker
+
+**Date**: 2026-09-02 · **Status**: Accepted
+
+**Context**: ADR-019 left the 8 PM–4 AM row of the routing table open
+pending one sandbox test of Alpaca's 24/5 session. The test ran Tuesday
+2026-09-01 at 8:05 PM ET: two 1-share limit buys just above the last
+trade — one with `extended_hours`, one plain — were accepted and then sat
+unfilled for 90 seconds before being cancelled. The sandbox has no
+overnight execution: Alpaca's docs say the session needs enablement by
+their team, and the free data feed carries no overnight prints to fill
+against.
+
+**Decision**: **An order placed between 8 PM and 4 AM on a weeknight
+queues at the broker** and executes at 4:00 AM premarket (with
+`extended_hours`) or the 9:30 open. The routing table is unchanged in
+code — this was already the behaviour — and the weekend engine stays a
+weekend-and-holiday product. The alternative, extending the engine over
+those hours, was declined: it would take gap risk over a window that a
+regulated venue serves in production, for a benefit (a few hours of
+immediacy) the paper does not claim.
+
+**Consequences**: The five-window table is final. If 24/5 is ever
+enabled for the correspondent, `sessions.py` already names the window
+and `_place_hedge` already shapes an overnight order; adopting it is a
+one-line change plus a re-run of this test.

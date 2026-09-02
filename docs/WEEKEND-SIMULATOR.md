@@ -43,7 +43,7 @@ Every hour of the week has exactly one execution path (ADR-019):
 | Mon–Fri 4:00 AM – 9:30 AM | premarket | Alpaca, limit + `extended_hours` |
 | Mon–Fri 9:30 AM – 4:00 PM | regular | Alpaca, anything |
 | Mon–Fri 4:00 PM – 8:00 PM | after-hours | Alpaca, limit + `extended_hours` |
-| Sun–Thu 8:00 PM – 4:00 AM | overnight | Alpaca 24/5 (Blue Ocean ATS) — pending our sandbox test |
+| Sun–Thu 8:00 PM – 4:00 AM | overnight | queues at Alpaca until 4:00 AM premarket (24/5 not executable in the sandbox — ADR-024) |
 | Fri 8:00 PM – Sun 8:00 PM | **weekend** | **the ERR engine** |
 
 The surprise from the research: Alpaca now covers 24/5, so the true dead

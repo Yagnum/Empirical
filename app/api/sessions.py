@@ -5,9 +5,10 @@ Every hour of the week has exactly one execution path:
     premarket    Mon-Fri 4:00 AM - 9:30 AM ET    Alpaca, limit + extended_hours
     regular      Mon-Fri 9:30 AM - 4:00 PM ET    Alpaca, any order type
     afterhours   Mon-Fri 4:00 PM - 8:00 PM ET    Alpaca, limit + extended_hours
-    overnight    Sun-Thu 8:00 PM - 4:00 AM ET    Alpaca 24/5 (Blue Ocean ATS),
-                                                 limit only - pending the
-                                                 sandbox test in ADR-019
+    overnight    Sun-Thu 8:00 PM - 4:00 AM ET    orders queue at Alpaca until
+                                                 4:00 AM premarket (24/5 is not
+                                                 executable in the sandbox -
+                                                 ADR-024)
     weekend      Fri 8:00 PM - Sun 8:00 PM ET    the ERR engine (Jupiter price,
                                                  reserve, escrow, Monday hedge)
 

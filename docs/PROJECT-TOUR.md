@@ -127,7 +127,7 @@ This is the heart of the paper, now running. Built and verified live
 
 **The routing rule.** A new module, `sessions.py`, answers one question —
 *which of the five trading windows is it?* — premarket, regular,
-after-hours, overnight (Alpaca's 24/5, pending the sandbox test), or the
+after-hours, overnight (orders queue at Alpaca until 4 AM — ADR-024), or the
 **weekend**: Friday 8 PM to Sunday 8 PM ET, the 48 hours no regulated
 venue serves. Every hour has exactly one execution path, and Jupiter is
 never the path while Alpaca is. (A finding along the way: Alpaca now
@@ -291,9 +291,6 @@ the hand-checked cash figures.
 
 ## 8. What is not built yet
 
-- **The overnight verdict** — tonight's 8:05 PM sandbox test decides
-  whether Alpaca's 24/5 session works for us, or those hours join the
-  engine's window.
 - **Research questions 3–5** — simulate the paper's cascade on the
   recorded weekends, off-hours tracking, engine-ledger reconciliation.
   (RQ2's data collection is running — §7.)
