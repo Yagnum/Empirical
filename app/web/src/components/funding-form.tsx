@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 
 import { buttonStyles } from "@/components/button";
 import { depositFunds, type FundingState } from "@/lib/actions";
@@ -17,9 +17,40 @@ const PRESETS = [1_000, 10_000, 25_000];
 
 const INITIAL_STATE: FundingState = { status: "idle" };
 
+/*
+  A brand-new brokerage account takes a few seconds to activate, and a deposit
+  that arrives first is refused. The person should not have to notice: the
+  form keeps the deposit they asked for and resubmits it every few seconds
+  until the account is ready, then shows the receipt as if nothing happened.
+  Only after two minutes of waiting does it hand control back with words.
+*/
+const ACTIVATION_RETRY_MS = 4_000;
+const ACTIVATION_MAX_TRIES = 30;
+
 export function FundingForm() {
   const [state, action, pending] = useActionState(depositFunds, INITIAL_STATE);
   const [amount, setAmount] = useState("10000");
+  const formRef = useRef<HTMLFormElement>(null);
+  const tries = useRef(0);
+  const [stalled, setStalled] = useState(false);
+
+  const activating = state.status === "activating" && !stalled;
+
+  useEffect(() => {
+    if (state.status !== "activating") {
+      tries.current = 0;
+      return;
+    }
+    if (tries.current >= ACTIVATION_MAX_TRIES) {
+      setStalled(true);
+      return;
+    }
+    const timer = setTimeout(() => {
+      tries.current += 1;
+      formRef.current?.requestSubmit();
+    }, ACTIVATION_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [state]);
 
   // The same validator the Server Action runs, so the button never offers to
   // submit something the server is going to reject.
@@ -36,8 +67,8 @@ export function FundingForm() {
   }
 
   return (
-    <form action={action} className="px-6 py-7">
-      <fieldset className="border-0 p-0" disabled={pending}>
+    <form ref={formRef} action={action} className="px-6 py-7">
+      <fieldset className="border-0 p-0" disabled={pending || activating}>
         <legend className="font-display text-[14px] font-semibold text-ink">
           Starting balance
         </legend>
@@ -89,25 +120,49 @@ export function FundingForm() {
           reset the balance any time.
         </p>
 
-        {/* Validation as you type; the server's message replaces it on failure. */}
-        <p aria-live="polite" className="mt-3 min-h-5 text-[13px] text-loss">
-          {state.status === "error"
-            ? state.message
-            : !check.valid && amount.trim() !== ""
-              ? check.message
-              : ""}
-        </p>
+        {activating ? (
+          <p
+            aria-live="polite"
+            className="mt-3 flex items-start gap-2.5 rounded-control border border-rule bg-surface px-3.5 py-3 text-[13px] leading-relaxed text-ink-soft"
+          >
+            <span
+              aria-hidden
+              className="mt-1.5 h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent"
+            />
+            <span>
+              <span className="font-medium text-ink">
+                Setting up your brokerage account
+              </span>{" "}
+              — this usually takes under a minute. Your{" "}
+              <span className="figure-nums">{formatUsd(state.amount)}</span>{" "}
+              deposit will go through by itself once it is ready.
+            </span>
+          </p>
+        ) : (
+          /* Validation as you type; the server's message replaces it on failure. */
+          <p aria-live="polite" className="mt-3 min-h-5 text-[13px] text-loss">
+            {stalled && state.status === "activating"
+              ? "The broker is taking longer than usual to activate your account. Try the deposit again in a minute."
+              : state.status === "error"
+                ? state.message
+                : !check.valid && amount.trim() !== ""
+                  ? check.message
+                  : ""}
+          </p>
+        )}
 
         <button
           type="submit"
-          disabled={!check.valid || pending}
+          disabled={!check.valid || pending || activating}
           className={`${buttonStyles("primary")} mt-2 w-full`}
         >
-          {pending
-            ? "Depositing…"
-            : check.valid
-              ? `Deposit ${formatUsd(check.amount)}`
-              : "Deposit"}
+          {activating
+            ? "Waiting for your account…"
+            : pending
+              ? "Depositing…"
+              : check.valid
+                ? `Deposit ${formatUsd(check.amount)}`
+                : "Deposit"}
         </button>
       </fieldset>
     </form>

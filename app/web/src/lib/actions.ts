@@ -36,6 +36,12 @@ import {
 export type FundingState =
   | { status: "idle" }
   | { status: "error"; message: string }
+  /**
+   * The broker has not activated the brand-new account yet (409
+   * account_not_active). Not an error: the form waits and resubmits the same
+   * deposit by itself until the account is ready.
+   */
+  | { status: "activating"; amount: number }
   | { status: "success"; amount: number; transferId: string; settled: boolean };
 
 /**
@@ -59,15 +65,19 @@ export async function depositFunds(
   const result = await fundAccount(check.amount);
 
   if (!result.ok) {
+    // A brand-new account sits in SUBMITTED for a few seconds after it is
+    // opened. That is a wait, not a failure: hand the form the amount so it
+    // can keep trying on the person's behalf.
+    if (result.failure === "conflict" && result.detail?.startsWith("account_not_active")) {
+      return { status: "activating", amount: check.amount };
+    }
     // 422 here can only be about the amount, so say so rather than falling
     // back to the generic wording.
-    // 409 during onboarding means the broker has not activated the account
-    // yet; that takes a few seconds after it is opened.
     const message =
       result.failure === "invalid"
         ? "That amount was rejected. Enter a value between $1 and $100,000."
         : result.failure === "conflict"
-          ? "Your brokerage account is still being activated. This usually takes under a minute. Try again shortly."
+          ? "The broker could not accept this deposit right now. Try again in a moment."
           : describe(result.failure);
     return { status: "error", message };
   }
