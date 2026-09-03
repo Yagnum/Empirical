@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+import datetime as dt
+from decimal import Decimal, InvalidOperation
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -15,6 +18,7 @@ import audit
 import clerk_auth
 import db
 import offboarding
+import sessions
 import weekend
 from config import settings
 
@@ -218,4 +222,59 @@ def my_account(user_id: str = Depends(clerk_auth.require_user_id)) -> dict:
         "buying_power": _money(trading.get("buying_power")),
         "portfolio_value": _money(trading.get("portfolio_value")),
         "equity": _money(trading.get("equity")),
+        "last_equity": _money(trading.get("last_equity")),
+        "day_change": day_change(account_id, trading),
+    }
+
+
+# Activity types that move cash without being a trade: deposits, withdrawals,
+# and the journals ADR-011 funds accounts with. Money arriving is not profit.
+_CASH_FLOW_TYPES = {"JNLC", "CSD", "CSW", "CSR"}
+
+
+def _cash_flow_today(account_id: str) -> Decimal:
+    """Net deposits minus withdrawals since midnight Eastern, as Alpaca
+    reports them. The ERR engine's own journals (tagged "ERR ...") are
+    trading flows, not deposits, so they stay in the day's P/L."""
+    start_of_day = dt.datetime.now(sessions.ET).replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = alpaca.list_activities(account_id, after=start_of_day.isoformat())
+    total = Decimal("0")
+    for row in rows:
+        if str(row.get("activity_type") or "").upper() not in _CASH_FLOW_TYPES:
+            continue
+        if str(row.get("description") or "").startswith("ERR "):
+            continue
+        try:
+            total += Decimal(str(row.get("net_amount") or "0"))
+        except InvalidOperation:
+            continue
+    return total
+
+
+def day_change(account_id: str, trading: dict) -> dict | None:
+    """Today's move in the account's value, the way a broker statement means it:
+
+        equity now - equity at yesterday's close - cash you moved in today
+
+    Alpaca's own `profit_loss` counts a deposit as a gain (a brand-new
+    account shows "+$75,000 today" after funding), so the figure is rebuilt
+    here from `last_equity` and the day's cash flows. Null when there is no
+    baseline yet - a new account before any trading - or when the activity
+    feed cannot be read, in which case saying nothing beats saying a number
+    that is wrong.
+    """
+    try:
+        equity = Decimal(str(trading.get("equity") or "0"))
+        last_equity = Decimal(str(trading.get("last_equity") or "0"))
+        flows = _cash_flow_today(account_id)
+    except (alpaca.AlpacaError, InvalidOperation):
+        return None
+    base = last_equity + flows
+    if base <= 0:
+        return None
+    amount = equity - base
+    percent = amount / base * Decimal("100")
+    return {
+        "amount": format(amount.quantize(Decimal("0.01")), "f"),
+        "percent": format(percent.quantize(Decimal("0.01")), "f"),
     }

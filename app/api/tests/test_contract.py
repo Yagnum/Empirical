@@ -627,8 +627,9 @@ def test_phase_one_routes_are_unchanged(client, monkeypatch):
         alpaca, "get_trading_account",
         lambda account_id: {"status": "ACTIVE", "currency": "USD", "cash": "10000",
                             "buying_power": "10000", "portfolio_value": "10000",
-                            "equity": "10000"},
+                            "equity": "10000", "last_equity": "9500"},
     )
+    monkeypatch.setattr(alpaca, "list_activities", lambda account_id, **kw: [])
     monkeypatch.setattr("clerk_auth.get_user", lambda user_id: object())
     monkeypatch.setattr("clerk_auth.get_alpaca_account_id", lambda user: "acct-test-0001")
     assert client.get("/accounts/me").json() == {
@@ -639,7 +640,33 @@ def test_phase_one_routes_are_unchanged(client, monkeypatch):
         "buying_power": "10000",
         "portfolio_value": "10000",
         "equity": "10000",
+        "last_equity": "9500",
+        # 10000 - 9500, no deposits today: +500, 5.26% of the 9500 base.
+        "day_change": {"amount": "500.00", "percent": "5.26"},
     }
+
+
+def test_day_change_excludes_todays_deposits(client, monkeypatch):
+    """A fresh account funded with $75,000 today has not made $75,000."""
+    import routes_accounts
+
+    trading = {"equity": "74968.25", "last_equity": "0"}
+    monkeypatch.setattr(
+        alpaca, "list_activities",
+        lambda account_id, **kw: [
+            {"activity_type": "JNLC", "net_amount": "75000", "description": "funding"},
+            # The engine's own journals are trading flows, not deposits.
+            {"activity_type": "JNLC", "net_amount": "-22.32", "description": "ERR escrow - weekend trade 9"},
+            {"activity_type": "FILL", "net_amount": "-34104.63"},
+        ],
+    )
+    change = routes_accounts.day_change("acct-test-0001", trading)
+    # 74968.25 - (0 + 75000) = -31.75, against a 75000 base.
+    assert change == {"amount": "-31.75", "percent": "-0.04"}
+
+    # No baseline at all (brand new, nothing deposited): say nothing.
+    monkeypatch.setattr(alpaca, "list_activities", lambda account_id, **kw: [])
+    assert routes_accounts.day_change("acct-test-0001", trading) is None
 
 
 # ---------------------------------------------------------------------------

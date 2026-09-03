@@ -24,7 +24,6 @@ import {
   getPositions,
   getRealizedPl,
   type Account,
-  type PortfolioHistory,
   type RealizedPl,
 } from "@/lib/api";
 import { portfolioRange } from "@/lib/chart";
@@ -68,7 +67,6 @@ export default async function DashboardPage() {
     <div className="mx-auto max-w-6xl px-6 py-10 sm:py-12">
       <AccountSummary
         account={account.data}
-        history={initialHistory}
         realized={realized.ok ? realized.data : undefined}
       />
 
@@ -138,29 +136,20 @@ export default async function DashboardPage() {
 
 /* --------------------------------------------------------------- header -- */
 
-/** The last number in an Alpaca series that is actually a number. */
-function lastValue(series: string[] | undefined): number | null {
-  if (!series) return null;
-  for (let index = series.length - 1; index >= 0; index -= 1) {
-    const value = toNumber(series[index]);
-    if (value !== null) return value;
-  }
-  return null;
-}
-
 /** The statement: one hero figure, the day's move, then cash and buying power. */
 function AccountSummary({
   account,
-  history,
   realized,
 }: {
   account: Account;
-  history?: PortfolioHistory;
   /** Absent when the ledger cannot answer — the stat is then simply not there. */
   realized?: RealizedPl;
 }) {
-  const changeAmount = lastValue(history?.profit_loss);
-  const changePct = lastValue(history?.profit_loss_pct);
+  // From the API, with today's deposits taken out: Alpaca's own series
+  // counts money you moved in as profit, and a fresh $75,000 account would
+  // otherwise announce a $75,000 gain. `history` still draws the chart.
+  const changeAmount = toNumber(account.day_change?.amount ?? null);
+  const changePct = toNumber(account.day_change?.percent ?? null);
 
   return (
     <Panel>

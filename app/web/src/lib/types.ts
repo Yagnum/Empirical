@@ -21,6 +21,13 @@ export type Account = {
   buying_power: string;
   portfolio_value: string;
   equity: string;
+  /** Equity at the previous close; "0" for an account opened today. */
+  last_equity: string;
+  /**
+   * Today's move with deposits and withdrawals taken out - what a broker
+   * statement means by "day change". Null when there is no baseline yet.
+   */
+  day_change: { amount: string; percent: string } | null;
 };
 
 export type ProvisionedAccount = {
