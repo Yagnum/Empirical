@@ -246,6 +246,11 @@ formats a request that only a private key can turn into a trade.
 
 ---
 
+> **Update 2026-09-04 (ADR-025).** Yagnum now does this step for real, in
+> shadow: `jupiter.build_swap` asks Jupiter for the transaction against the
+> engine wallet, `solana.sign` signs it locally, `solana.simulate` runs it on
+> mainnet, and nothing is sent. See [SHADOW-HEDGE.md](SHADOW-HEDGE.md).
+
 ## 6. Step six: the on-chain record
 
 **Simply.** Every completed swap is written into a public ledger that

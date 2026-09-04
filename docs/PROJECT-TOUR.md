@@ -2,7 +2,8 @@
 
 A tour of everything that exists, how it works, and why it is built that
 way. Written 2026-08-31, the day the ERR engine went live; updated
-2026-09-01 with the spread recorder and holiday routing. Each section
+2026-09-01 with the spread recorder and holiday routing, and 2026-09-04
+with Version B's shadow hedge and the simulated traders. Each section
 links to the deep doc; this one is the map.
 
 **The problem in one sentence.** The US stock market is closed 48 hours
@@ -289,7 +290,60 @@ the hand-checked cash figures.
 
 ---
 
-## 8. What is not built yet
+## 8. ★ Sep 4: Version B in shadow, and eight traders who are not people (ADR-025, ADR-026)
+
+Two decisions in one afternoon, both the owner's.
+
+**Why Version B came back.** The point of this project is to learn the
+crypto ecosystem in detail, and Version A never touches Solana. The
+paper's design does: guarantee the customer the weekend price, mirror the
+trade in the token. Its cost is a number nobody had measured. So:
+
+**The shadow hedge.** Every weekend trade now runs its on-chain mirror
+end to end and stops one step before sending. Quote on Jupiter for the
+exact size → Jupiter builds the transaction against Yagnum's real engine
+wallet (`G7Zr6w…`) → the keypair signs it locally → mainnet
+`simulateTransaction` → the fees are worked out in lamports and dollars
+→ one `hedge_legs` row. At settlement the close leg does it again and
+writes `version_b_pnl`: what Yagnum would have made on this trade had it
+guaranteed the price and hedged. The first leg, trade 7 at 3:58 PM:
+
+| Step | Result |
+| --- | --- |
+| Quote | sell 2 NVDAx → 461.598 USDC, route Raydium CLMM, impact 0.00017% |
+| Build | 1 signature, 3 instructions; Jupiter's own simulation: "no prior credit" (empty wallet) |
+| Sign | signed locally, signature recorded |
+| Simulate | `AccountNotFound` — the fee payer holds no SOL. Honest. |
+| Rent | NVDAx is Token-2022; no token account yet → 1,855,569 lamports |
+| Gas | 1,860,569 lamports = **$0.19** at SOL $101.78. Rent is 99.7% of it. |
+
+What that teaches: the signer pays; rent, not the fee, is the surprise;
+the spread (about $2 on that sale) is ten times the gas and goes to the
+pool, not Jupiter. All in [SOLANA-GAS-AND-JUPITER.md](SOLANA-GAS-AND-JUPITER.md)
+and [SHADOW-HEDGE.md](SHADOW-HEDGE.md).
+
+**The simulated traders.** Eight personas (Maya the momentum chaser,
+Walter the value buyer, Dev the degen, Priya the indexer, Ken the
+contrarian, Lena who only trades tight spreads, Omar the weekend
+specialist, Sam the mean-reverter), each a real funded sandbox account
+with a starter basket, each a Groq model that reads a briefing and
+answers one JSON wish. The wish goes through the same door a person's
+order does. The model never touches money; everything it was told and
+said is stored. Cadence is set by Groq's free plan: each persona decides
+every two hours. What it is evidence of: the engine under load and the
+hedge's cost per trade. What it is not: anything about markets.
+[SIM-USERS.md](SIM-USERS.md).
+
+**Not yet decided, and not mine to decide:** whether to fund the wallet
+and send real swaps (Version B step two). Two questions first — capital,
+and Backed's terms about US persons.
+
+---
+
+## 9. What is not built yet
+
+- **Version B, step two** — a funded wallet and real sends, behind a
+  flag, after the capital and US-persons questions (ADR-025).
 
 - **Research questions 3–5** — simulate the paper's cascade on the
   recorded weekends, off-hours tracking, engine-ledger reconciliation.
@@ -304,21 +358,24 @@ the hand-checked cash figures.
 
 ---
 
-## 9. The reading map
+## 10. The reading map
 
 | Doc | What it teaches |
 | --- | --- |
+| [SHADOW-HEDGE.md](SHADOW-HEDGE.md) | ★ Version B in shadow: the two legs, the real numbers, the P/L columns |
+| [SOLANA-GAS-AND-JUPITER.md](SOLANA-GAS-AND-JUPITER.md) | ★ Who pays gas, rent, the priority fee, the spread, how Jupiter earns |
+| [SIM-USERS.md](SIM-USERS.md) | ★ The eight personas, the rules, what they are evidence of |
 | [YAGNUM-EXPLAINED.md](YAGNUM-EXPLAINED.md) | The concept: the problem, the hedge, the formulas, the cascade |
 | [SIZING-THE-RESERVE.md](SIZING-THE-RESERVE.md) | The statistics: σ, z, the bell curve from the ground up, where the data lives |
 | [JUPITER-FLOW.md](JUPITER-FLOW.md) | The token side: mints, decimals, quotes vs prices, the on-chain record |
 | [WEEKEND-SIMULATOR.md](WEEKEND-SIMULATOR.md) | ★ The engine's lifecycle with real numbers, and how to drive the simulator |
-| [DECISIONS.md](DECISIONS.md) | Every choice, numbered, with reasons — ADR-001 through ADR-021 |
+| [DECISIONS.md](DECISIONS.md) | Every choice, numbered, with reasons — ADR-001 through ADR-026 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The structural reference: routes, tables, phases |
 | `docs/postman/` | Every API call, sendable by hand |
 
 ---
 
-## 10. Say it back
+## 11. Say it back
 
 1. What is the only thing the weekend simulator fakes? *(The calendar.)*
 2. A customer weekend-sells and the price falls 1% by Monday. Walk the
@@ -332,3 +389,9 @@ the hand-checked cash figures.
 4. Why does `research_params.json` carry a date? *(Because σ and z are
    measurements that go stale; the date says how stale, and each recorded
    weekend refreshes them.)*
+5. Who pays gas when the shadow hedge becomes live? *(The engine wallet:
+   the wallet that signs pays. Today nothing is sent, so nobody does.)*
+6. What did Maya's Saturday sell prove about Monday's price? *(Nothing.
+   It proved the engine can take her order, hold her reserve, and settle
+   her at Monday's price, and it priced what hedging her would have cost.)*
+

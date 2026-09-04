@@ -154,7 +154,15 @@ real hedge, dev-only `mode=injected` settles at a chosen gap), and
 `POST /dev/clock` (development only — the simulated-weekend switch; 404 in
 production). Settlement runs unattended from
 `.github/workflows/settle-weekend.yml` (ADR-023) via
-`scripts/settle_weekend.py`. `POST /orders` gains `extended_hours` for the 4–9:30 AM and
+`scripts/settle_weekend.py`. Since ADR-025 every weekend trade also records its
+**shadow hedge** (`hedge.py` + `solana.py`: Jupiter builds the on-chain mirror
+against the engine wallet, it is signed locally and simulated on mainnet, never
+sent; table `hedge_legs`, one row per leg, with fees and the Version B P/L).
+**Simulated traders** (ADR-026, `sim.py`, tables `sim_users` + `sim_decisions`,
+`scripts/sim_users.py`, hourly `.github/workflows/sim-users.yml`): eight Groq
+personas with their own sandbox accounts whose JSON intents enter through the
+same engine calls a person's order does; `weekend_trades.source` tells them
+apart. `POST /orders` gains `extended_hours` for the 4–9:30 AM and
 4–8 PM sessions. Tables `weekend_trades` + `weekend_trade_events`; reserve
 parameters in `app/api/research_params.json` (ADR-018). The walkthrough
 lives in `docs/WEEKEND-SIMULATOR.md`.
@@ -171,7 +179,7 @@ via `uv run alembic upgrade head` in `app/api`.
 - **Phase 2 — Trading core** ✅ verified with live fills (2026-08-27): symbol lookup + quotes, buy/sell by quantity, order status, cancel.
 - **Phase 3 — Dashboard** ✅ verified with live fills (2026-08-27): positions, portfolio chart, order history, activities, CSV export.
 - **Phase 4 — Production polish**: Postgres per ADR-014 ✅ (audit log, order idempotency, fills ledger for realized P/L — live 2026-08-27); Clerk `user.deleted` offboarding webhook and reset-balance per ADR-015 ✅ (code + tests 2026-08-27; the webhook registers with Clerk once the API has a public URL); production Clerk config (checklist in `docs/PRODUCTION.md`); deployment to Azure.
-- **Phase 5+ — Paper territory**: market-hours awareness, Jupiter integration ✅ (read-only token prices 2026-08-29), gap-volatility research ✅ first cut (`notebooks/`, sampler + backfill live), ERR engine ✅ v1 with the weekend simulator (2026-08-31, verified live: real open→hedge→true-up cycle and an injected-gap breach); remaining: the scheduled settlement job, overnight-session verdict, holiday routing, RQ2–RQ5.
+- **Phase 5+ — Paper territory**: market-hours awareness, Jupiter integration ✅ (read-only token prices 2026-08-29), gap-volatility research ✅ first cut (`notebooks/`, sampler + backfill live), ERR engine ✅ v1 with the weekend simulator (2026-08-31, verified live: real open→hedge→true-up cycle and an injected-gap breach); scheduled settlement ✅ (ADR-023), overnight verdict ✅ (ADR-024), holiday routing ✅ (ADR-021), spread recorder ✅ (ADR-020), Version B shadow hedge ✅ and simulated traders ✅ (2026-09-04, ADR-025/026); remaining: Version B step two (live sends), RQ2 analysis, RQ3–RQ5.
 
 ## Running locally
 

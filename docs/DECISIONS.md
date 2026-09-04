@@ -741,3 +741,86 @@ immediacy) the paper does not claim.
 enabled for the correspondent, `sessions.py` already names the window
 and `_place_hedge` already shapes an overnight order; adopting it is a
 one-line change plus a re-run of this test.
+
+---
+
+## ADR-025 — Version B adopted, shadow hedge first; Yagnum signs but does not send
+
+**Date**: 2026-09-04 · **Status**: Accepted
+
+**Context**: ADR-017/019 built Version A: pass-through settlement, no
+on-chain hedge, Yagnum never touches Solana. It works and it is honest,
+but the owner's purpose for this project is to learn the crypto
+ecosystem in detail — who pays gas, how a swap is built and signed, what
+a token account costs, how Jupiter earns — and Version A hides all of
+it. The paper's own design (Version B) guarantees the customer the
+weekend price and mirrors the trade in the token. Whether B is worth its
+cost (spread crossed twice, gas, inventory, tracking error) is a number
+nobody has measured.
+
+**Decision**: **Build toward Version B in two steps.** Step one, done
+today: every weekend trade gets a **shadow hedge** — the on-chain mirror
+is quoted, built by Jupiter against a real engine wallet, signed with the
+engine keypair where it is held, simulated on mainnet, and recorded in
+`hedge_legs` with its fees in lamports and dollars; at settlement the
+close leg records `broker_pnl`, `chain_pnl` and `version_b_pnl` for that
+trade. **Nothing is sent.** Step two, a later ADR: fund the wallet and
+send, behind a flag, after two questions are answered — the capital
+(SOL, USDC and xStock inventory, because a DEX cannot short) and Backed's
+terms, which state xStocks are not offered to US persons. Version A
+remains the live settlement meanwhile.
+
+The rule "Yagnum never signs an on-chain transaction" (ADR-017) is
+replaced by: **Yagnum signs, never sends, until ADR-0xx says otherwise.**
+The secret key lives only in the local `.env`; the GitHub Actions hosts
+hold the public key and build unsigned (simulation does not verify
+signatures).
+
+**Consequences**: The first hedge legs ran the same afternoon (trade 7:
+$0.19 of gas per leg, 99.7% of it token-account rent; simulation fails
+`AccountNotFound` on the empty wallet, which is the honest result). Every
+sim and user trade from tonight on carries the Version B figure. The
+trader-facing behaviour is unchanged. New settings: `HEDGE_MODE`,
+`SOLANA_RPC_URL`, `SOLANA_ENGINE_KEYPAIR`, `SOLANA_ENGINE_PUBKEY`. New
+docs: `SHADOW-HEDGE.md`, `SOLANA-GAS-AND-JUPITER.md`.
+
+---
+
+## ADR-026 — Simulated traders: language-model personas through the real engine
+
+**Date**: 2026-09-04 · **Status**: Accepted
+
+**Context**: One person clicking a button produces one weekend trade a
+day. The engine has never been exercised by many trades at once, and the
+hedge (ADR-025) needs trades to price. The owner asked for free
+language-model agents (Groq) to simulate realistic users over the
+weekend and record everything.
+
+**Decision**: **Eight personas, each with its own funded sandbox account,
+each deciding by itself** — when, what and how much — from a briefing of
+its own account and the sampler's prices, answering one JSON intent per
+turn. Three rules:
+
+1. **The model never touches money.** The intent goes through the same
+   code path as a person's order (`weekend.open_trade`, or an Alpaca
+   order) and the engine's own checks accept or refuse it.
+2. **Everything is recorded.** Briefing, prompt, raw answer, model, token
+   counts, latency, the parsed intent and the outcome, in
+   `sim_decisions`. Sim trades carry `weekend_trades.source = 'sim'`.
+3. **What it is evidence of is stated in the code and the doc.** The
+   population tests the engine and prices the hedge. It says nothing
+   about markets.
+
+Cadence follows Groq's free plan (200K tokens/day at ~2K per decision):
+hourly cron, two alternating groups, each persona every two hours, 20 s
+between calls, stop on 429. The job fails visibly without a key rather
+than substituting scripted decisions — the owner chose agents, so agents
+or nothing.
+
+**Consequences**: Provisioned 2026-09-04: eight accounts, $50,000 each,
+$25,000 starter baskets bought in the after-hours session. First
+unattended turn at 8:07 PM ET tonight once `GROQ_API_KEY` is set. About
+100 decisions a day; Tuesday's settlement run will be the first with
+dozens of open trades. New tables `sim_users`, `sim_decisions`; script
+`scripts/sim_users.py`; workflow `sim-users.yml`; doc `SIM-USERS.md`.
+

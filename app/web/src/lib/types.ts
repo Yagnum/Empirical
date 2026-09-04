@@ -143,6 +143,8 @@ export type WeekendTrade = {
   fees: string;
   state: WeekendTradeState;
   simulated: boolean;
+  /** "user" for a person through the app, "sim" for a Groq persona (ADR-026). */
+  source: "user" | "sim";
   settlement_mode: "market" | "injected" | null;
   injected_gap: string | null;
   hedge_order_id: string | null;

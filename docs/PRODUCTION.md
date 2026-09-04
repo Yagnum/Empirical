@@ -68,3 +68,20 @@ the safety nets, so each removal must be deliberate.
   with a ledger lock inside the app; with JNLS enabled, custody moves to
   the engine account (`ALPACA_ENGINE_ACCOUNT_ID`, created 2026-09-01) and
   the lock becomes physical.
+
+## Simulated traders and the shadow hedge (ADR-025, ADR-026)
+
+- **Repository secrets** (Settings → Secrets and variables → Actions):
+  `GROQ_API_KEY` for `sim-users.yml`; `ALPACA_FIRM_ACCOUNT_ID` for both
+  `sim-users.yml` and `settle-weekend.yml` (they move sandbox cash).
+  `JUP_API_KEY` is shared with the sampler.
+- **The engine wallet's secret key never leaves the local `.env`.** The
+  workflows carry only `SOLANA_ENGINE_PUBKEY`; they build and simulate
+  unsigned. Rotate the keypair before any live send (a separate ADR).
+- **In production, switch the sim off or give it its own correspondent.**
+  Eight model-driven accounts trading beside real customers would
+  confuse every report. `update sim_users set active = false` stops them;
+  the history stays.
+- **RPC**: the public mainnet endpoint is rate-limited. A Helius (or
+  similar) key in `SOLANA_RPC_URL` is the upgrade once volume grows.
+
