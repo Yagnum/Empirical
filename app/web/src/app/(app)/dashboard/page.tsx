@@ -181,7 +181,12 @@ function AccountSummary({
               <p className="text-[14px] text-ink-soft">Unchanged today</p>
             ) : (
               <>
-                <Delta amount={changeAmount} percent={changePct} size="lg" />
+                <Delta
+                  amount={changeAmount}
+                  percent={changePct}
+                  percentIsWhole
+                  size="lg"
+                />
                 <span className="text-[13px] text-ink-faint">today</span>
               </>
             )}
