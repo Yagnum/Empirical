@@ -526,6 +526,8 @@ class SimDecision(Base):
     briefing: Mapped[str] = mapped_column(Text, nullable=False)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     raw_output: Mapped[str | None] = mapped_column(Text)
+    # The model's own deliberation before the answer, when it reports one.
+    reasoning: Mapped[str | None] = mapped_column(Text)
     action: Mapped[str | None] = mapped_column(String(8))
     symbol: Mapped[str | None] = mapped_column(String(16))
     qty: Mapped[Decimal | None] = mapped_column(QTY)
@@ -534,6 +536,7 @@ class SimDecision(Base):
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     prompt_tokens: Mapped[int | None] = mapped_column(Integer)
     completion_tokens: Mapped[int | None] = mapped_column(Integer)
+    reasoning_tokens: Mapped[int | None] = mapped_column(Integer)
     outcome: Mapped[str] = mapped_column(String(16), nullable=False)
     ref: Mapped[str | None] = mapped_column(String(64))
     error: Mapped[str | None] = mapped_column(Text)

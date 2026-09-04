@@ -32,13 +32,20 @@ def complete(
     *,
     model: str | None = None,
     temperature: float = 0.7,
-    max_tokens: int = 400,
+    max_tokens: int = 1500,
 ) -> dict:
     """One chat completion in JSON mode.
 
-    Returns {"content", "model", "prompt_tokens", "completion_tokens",
-    "latency_ms"}. Raises GroqError with the HTTP status on refusal - 429 is
-    the free tier's rate limit and the caller records it as such.
+    Returns {"content", "reasoning", "model", "prompt_tokens",
+    "completion_tokens", "reasoning_tokens", "latency_ms"}. Raises GroqError
+    with the HTTP status on refusal - 429 is the free tier's rate limit and
+    the caller records it as such.
+
+    The gpt-oss models think before they answer, and those thinking tokens
+    count against `max_tokens`: a 400-token budget left the JSON cut off
+    and Groq answered 400 "failed to validate JSON" (2026-09-04). So the
+    budget is generous and the effort is set low - a trade intent does not
+    need a long deliberation, and the deliberation is kept as data anyway.
     """
     if not configured():
         raise GroqError("GROQ_API_KEY is not set")
@@ -48,6 +55,8 @@ def complete(
         "temperature": temperature,
         "max_tokens": max_tokens,
         "response_format": {"type": "json_object"},
+        # Only the reasoning models accept this; others reject unknown fields.
+        **({"reasoning_effort": "low"} if "gpt-oss" in chosen else {}),
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -73,14 +82,19 @@ def complete(
         raise GroqError(f"groq HTTP {response.status_code}: {detail}", response.status_code)
     payload = response.json()
     try:
-        content = payload["choices"][0]["message"]["content"]
+        message = payload["choices"][0]["message"]
+        content = message["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise GroqError("groq answer had no message content") from exc
     usage = payload.get("usage") or {}
+    details = usage.get("completion_tokens_details") or {}
+    reasoning = message.get("reasoning")
     return {
         "content": str(content),
+        "reasoning": str(reasoning) if reasoning else None,
         "model": str(payload.get("model") or chosen),
         "prompt_tokens": usage.get("prompt_tokens"),
         "completion_tokens": usage.get("completion_tokens"),
+        "reasoning_tokens": details.get("reasoning_tokens"),
         "latency_ms": latency_ms,
     }

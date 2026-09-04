@@ -59,8 +59,12 @@ the current session and the answer format.
    since the last regular-hours print, the executable spread, and that
    symbol's reserve percentage. All of it from the sampler's rows and the
    broker, none of it from the model.
-2. **Ask.** One call to Groq in JSON mode. The answer, the model name,
-   token counts and latency are stored.
+2. **Ask.** One call to Groq in JSON mode with a 1,500-token budget and
+   low reasoning effort. The gpt-oss models think before they answer and
+   the thinking counts against the budget: the first attempt with 400
+   tokens came back as "failed to validate JSON" because the answer was
+   cut off. The answer, the reasoning, the model name, token counts and
+   latency are stored.
 3. **Check.** The JSON is parsed and bounded: action in {buy, sell,
    hold}, symbol on the watchlist, quantity positive, at most 100 shares
    and $10,000. Anything else is stored as an unusable answer and nothing

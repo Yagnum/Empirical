@@ -159,7 +159,7 @@ HOW TRADING WORKS RIGHT NOW
 
 YOUR LIMITS
 - One decision per briefing: exactly one symbol, or hold.
-- Maximum {max_notional} USD and {max_qty} shares per decision. Only symbols on your watchlist.
+- Maximum {max_notional} USD and {max_qty} shares per decision; "max_qty_under_cap" per symbol is the most you may ask for. Only symbols on your watchlist.
 - Sells: you may only sell shares you hold and that are not committed. Buys: only with cash you have.
 - Holding is a real choice. Do not trade for the sake of trading; trade when your style says so.
 
@@ -230,6 +230,9 @@ def price_context(session: Session, underlying: str, now: dt.datetime | None = N
         "symbol": underlying,
         "token": token_symbol,
         "token_price": _fmt(latest.usd_price),
+        # The cap, done for them: the first live turn had two personas ask
+        # for $17,000 and $23,000 of SPY against a $10,000 cap.
+        "max_qty_under_cap": format((MAX_NOTIONAL_USD / latest.usd_price).quantize(Decimal("0.001"), rounding=ROUND_DOWN), "f"),
         "bid": _fmt(latest.bid_usd),
         "ask": _fmt(latest.ask_usd),
         "spread_pct": spread_pct,
@@ -431,6 +434,8 @@ def decide(session: Session, user: SimUser, live_session: str, *, write: bool) -
         session.commit()
         return decision
     decision.raw_output = answer["content"]
+    decision.reasoning = answer.get("reasoning")
+    decision.reasoning_tokens = answer.get("reasoning_tokens")
     decision.model = answer["model"]
     decision.latency_ms = answer["latency_ms"]
     decision.prompt_tokens = answer["prompt_tokens"]
