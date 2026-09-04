@@ -61,8 +61,34 @@ class Settings(BaseSettings):
     # guard lives in sessions.py and refuses anything but "development".
     app_env: str = "development"
 
+    # --- Groq (ADR-026: simulated users) ---
+    # An OpenAI-compatible chat endpoint. The model only ever produces a JSON
+    # trade intent; it never touches money code. Empty key = the sim tick
+    # refuses to run, loudly, rather than substituting made-up decisions.
+    groq_api_key: str = ""
+    # Free plan (checked 2026-09-04): 30 requests/min, 1,000/day, 8K
+    # tokens/min, 200K tokens/day. A decision costs about 2K tokens, so the
+    # population is paced to roughly 100 decisions a day (sim.py).
+    groq_model: str = "openai/gpt-oss-120b"
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+
+    # --- Solana (ADR-025: Version B, shadow hedge first) ---
+    # The engine wallet. In "shadow" mode every weekend trade builds the
+    # on-chain hedge for real (Jupiter swap transaction against this wallet),
+    # signs it when the keypair is present, and simulates it on mainnet - but
+    # never sends it. "off" skips the hedge entirely. There is no "live" yet.
+    hedge_mode: str = "shadow"
+    solana_rpc_url: str = "https://api.mainnet-beta.solana.com"
+    # base58 secret key (64 bytes). Never logged, never sent anywhere but the
+    # local signer. Optional: without it the shadow leg is built and simulated
+    # unsigned (simulation does not verify signatures).
+    solana_engine_keypair: str = ""
+    # The wallet's public key, for hosts that must not hold the secret (the
+    # GitHub Actions jobs). Ignored when the keypair is set.
+    solana_engine_pubkey: str = ""
+
     # --- Misc ---
-    jup_api_key: str = ""  # used in later crypto phases
+    jup_api_key: str = ""  # also unlocks api.jup.ag for the swap builder
     frontend_origin: str = "http://localhost:3000"
     # Every outbound HTTP call gets a timeout; a hung broker call must never
     # hang one of our request workers forever.

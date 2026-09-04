@@ -45,3 +45,7 @@ jobs:
           ALPACA_BROKER_ID: ${{ secrets.ALPACA_BROKER_ID }}
           ALPACA_BROKER_SECRET: ${{ secrets.ALPACA_BROKER_SECRET }}
           ALPACA_FIRM_ACCOUNT_ID: ${{ secrets.ALPACA_FIRM_ACCOUNT_ID }}
+          JUP_API_KEY: ${{ secrets.JUP_API_KEY }}
+          # The engine wallet's public key (ADR-025): the shadow hedge's close
+          # leg is built and simulated at settlement. No secret key on this host.
+          SOLANA_ENGINE_PUBKEY: G7Zr6w2CTfBkrBVr3Xj5PvEqt5R7ZJDdrh8GiEDYrzAZ

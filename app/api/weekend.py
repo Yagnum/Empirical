@@ -54,6 +54,7 @@ from sqlalchemy.orm import Session
 
 import alpaca
 import err
+import hedge
 import jupiter
 import sessions
 from config import settings
@@ -251,8 +252,13 @@ def open_trade(
     symbol: str,
     side: str,
     qty: Decimal,
+    source: str = "user",
 ) -> WeekendTrade:
-    """Steps 1-3: price, reserve, escrow, advance. Ends `provisional`."""
+    """Steps 1-3: price, reserve, escrow, advance. Ends `provisional`.
+
+    `source` is "user" for a person through the app, "sim" for a Groq
+    persona (ADR-026). It is recorded and never changes the arithmetic.
+    """
     firm = _require_firm_account()
     priced = price_trade(symbol, side, qty)
     token = priced["token"]
@@ -280,6 +286,7 @@ def open_trade(
         fees=sizing["fees"],
         state="provisional",
         simulated=sessions.weekend_override(),
+        source=source,
     )
     session.add(trade)
     session.commit()
@@ -328,12 +335,35 @@ def open_trade(
             description=f"ERR purchase charge ({_fmt(qty)} {trade.symbol} @ {_fmt(_money(p_open))}) - {tag}",
         )
     session.commit()
+    # The shadow hedge (ADR-025): the on-chain mirror of this trade, built
+    # and simulated but never sent. Observational; a failure is recorded on
+    # the leg row and never touches the trade.
+    _shadow_hedge(session, trade, "open")
     return trade
 
 
 # ---------------------------------------------------------------------------
 # Settlement
 # ---------------------------------------------------------------------------
+
+
+def _shadow_hedge(session: Session, trade: WeekendTrade, leg: str) -> None:
+    """Record the shadow hedge leg and one event line for it. Never raises."""
+    if not hedge.enabled():
+        return
+    try:
+        row = hedge.shadow_leg(session, trade, leg)
+    except Exception as exc:  # noqa: BLE001 - observational; must not block money
+        session.rollback()
+        _event(session, trade, f"hedge_shadow_{leg}", detail=f"failed: {exc}"[:500])
+        return
+    _event(
+        session,
+        trade,
+        f"hedge_shadow_{leg}",
+        amount=row.usd_amount if row is not None else None,
+        detail=hedge.summary(row),
+    )
 
 
 def _true_up(trade: WeekendTrade, p_close: Decimal) -> Decimal:
@@ -427,6 +457,8 @@ def _reconcile(session: Session, trade: WeekendTrade, *, sweep: bool) -> Weekend
 
     trade.settled_at = dt.datetime.now(dt.timezone.utc)
     session.commit()
+    if trade.state in ("settled", "breached") and "hedge_shadow_close" not in _event_kinds(session, trade):
+        _shadow_hedge(session, trade, "close")
     return trade
 
 

@@ -60,8 +60,11 @@ _TABLES = [
     "token_prices",
     "token_candles",
     "market_bars",
+    "hedge_legs",
     "weekend_trade_events",
     "weekend_trades",
+    "sim_decisions",
+    "sim_users",
 ]
 
 
@@ -73,6 +76,13 @@ def database_off(monkeypatch):
     fixture below simply overrides it.
     """
     monkeypatch.setattr(settings, "database_url", "")
+    # Nothing in the suite may reach the chain or the model by accident: the
+    # shadow hedge (ADR-025) and the Groq client (ADR-026) are off unless a
+    # test switches them on against a fake.
+    monkeypatch.setattr(settings, "hedge_mode", "off")
+    monkeypatch.setattr(settings, "solana_engine_keypair", "")
+    monkeypatch.setattr(settings, "solana_engine_pubkey", "")
+    monkeypatch.setattr(settings, "groq_api_key", "")
     ledger._last_sync.clear()
     yield
 

@@ -1,0 +1,49 @@
+# Simulated traders (ADR-026): every hour, around the clock, one of two
+# groups of Groq personas reads its briefing and decides - buy, sell, or
+# hold - and the decision goes through the same engine a person's would.
+# Weekend decisions open ERR trades (source="sim"); weekday ones place
+# sandbox orders. Each persona gets a turn every two hours: that is what
+# Groq's free plan (200K tokens a day) affords at ~2K tokens a decision.
+#
+# Minute 7 rather than 0: GitHub deprioritises the crowded top of the hour
+# (see sample-prices.yml).
+#
+# Secrets: the settlement job's, plus GROQ_API_KEY. The job places sandbox
+# orders and moves sandbox cash, which is why it never runs from a fork.
+# SOLANA_ENGINE_PUBKEY is the engine wallet's public key - public by nature -
+# so the shadow hedge (ADR-025) can build and simulate; the secret key stays
+# off this host.
+name: Simulated traders
+
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sim-users
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    if: github.repository_owner == 'Yagnum'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --no-dev
+      - run: uv run python scripts/sim_users.py tick --write
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ALPACA_BROKER_ID: ${{ secrets.ALPACA_BROKER_ID }}
+          ALPACA_BROKER_SECRET: ${{ secrets.ALPACA_BROKER_SECRET }}
+          ALPACA_FIRM_ACCOUNT_ID: ${{ secrets.ALPACA_FIRM_ACCOUNT_ID }}
+          JUP_API_KEY: ${{ secrets.JUP_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          SOLANA_ENGINE_PUBKEY: G7Zr6w2CTfBkrBVr3Xj5PvEqt5R7ZJDdrh8GiEDYrzAZ

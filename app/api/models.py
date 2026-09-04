@@ -288,6 +288,10 @@ class WeekendTrade(Base):
     fees: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False, default="provisional")
     simulated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Who placed it: "user" (a person through the app) or "sim" (a Groq
+    # persona, ADR-026). Research queries filter on this; it never changes
+    # how the engine treats the trade.
+    source: Mapped[str] = mapped_column(String(8), nullable=False, default="user", server_default="user")
     # Alpaca journal ids: the escrow in, the sell-side advance out.
     escrow_journal_id: Mapped[str | None] = mapped_column(String(64))
     advance_journal_id: Mapped[str | None] = mapped_column(String(64))
@@ -462,3 +466,148 @@ class MarketBar(Base):
     trade_count: Mapped[int | None] = mapped_column(Integer)
     vwap: Mapped[Decimal | None] = mapped_column(MONEY)
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="alpaca_iex")
+
+
+class SimUser(Base):
+    """A simulated trader (ADR-026): a persona, a Groq model, and a real
+    sandbox brokerage account of its own.
+
+    The persona text is the whole personality - it is what the model reads
+    before every decision. `watchlist` narrows the universe the persona
+    thinks about (comma-separated underlying symbols). A sim user is data:
+    it can be switched off (`active`) without deleting its history.
+    """
+
+    __tablename__ = "sim_users"
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    persona: Mapped[str] = mapped_column(Text, nullable=False)
+    watchlist: Mapped[str] = mapped_column(String(256), nullable=False)
+    alpaca_account_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(TZ, nullable=False, server_default=func.now())
+
+
+class SimDecision(Base):
+    """One tick of one simulated trader: what it was told, what it answered,
+    and what happened (ADR-026).
+
+    Everything is kept - the briefing, the full prompt, the raw model output,
+    token counts and latency - because the decision process is itself part
+    of the dataset. `outcome` is what the engine did with the intent:
+
+        weekend_trade   opened through the ERR engine (`ref` = trade id)
+        order           a regular Alpaca order (`ref` = order id)
+        hold            the persona chose to do nothing
+        refused         the engine said no (insufficient shares, cash, ...)
+        skipped         no path for this hour (overnight queues at the broker)
+        error           the model or a dependency failed; see `error`
+    """
+
+    __tablename__ = "sim_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "outcome in ('weekend_trade','order','hold','refused','skipped','error')",
+            name="outcome",
+        ),
+        Index("ix_sim_decisions_user_at", "sim_user_id", "at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    sim_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sim_users.id", ondelete="CASCADE"), nullable=False
+    )
+    at: Mapped[dt.datetime] = mapped_column(TZ, nullable=False, server_default=func.now(), index=True)
+    session: Mapped[str] = mapped_column(String(16), nullable=False)
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    briefing: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_output: Mapped[str | None] = mapped_column(Text)
+    action: Mapped[str | None] = mapped_column(String(8))
+    symbol: Mapped[str | None] = mapped_column(String(16))
+    qty: Mapped[Decimal | None] = mapped_column(QTY)
+    reason: Mapped[str | None] = mapped_column(Text)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    ref: Mapped[str | None] = mapped_column(String(64))
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class HedgeLeg(Base):
+    """One on-chain leg of a weekend trade's hedge (ADR-025, Version B).
+
+    Two legs per trade. The OPEN leg mirrors the customer on Jupiter at the
+    moment the trade opens (customer sells -> the engine sells the token;
+    customer buys -> the engine buys it). The CLOSE leg unwinds it when the
+    trade settles at the broker. In `mode` "shadow" the transaction is built
+    by Jupiter against the engine wallet, signed here when the keypair is
+    present, and simulated on mainnet - and never sent. The row records
+    what sending it would have cost, in lamports and in dollars at that
+    moment's SOL price.
+
+    On the close leg, the three P/L columns answer the Version B question
+    for this one trade: had Yagnum guaranteed `p_open` and hedged on-chain,
+    what would it have made or lost after spread and gas?
+
+        broker_pnl     the broker leg Yagnum would own: qty x (p_close - p_open)
+                       for a customer sell, the reverse for a buy
+        chain_pnl      qty x (open price - close price) for a sell-first
+                       hedge, the reverse for buy-first: the spread plus the
+                       token's own move, per token
+        version_b_pnl  broker_pnl + chain_pnl - gas of both legs
+    """
+
+    __tablename__ = "hedge_legs"
+    __table_args__ = (
+        CheckConstraint("leg in ('open','close')", name="leg"),
+        CheckConstraint("mode in ('shadow','live')", name="mode"),
+        CheckConstraint("side in ('buy','sell')", name="side"),
+        Index("ix_hedge_legs_trade", "trade_id", "leg"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    trade_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("weekend_trades.id", ondelete="CASCADE"), nullable=False
+    )
+    leg: Mapped[str] = mapped_column(String(8), nullable=False)
+    at: Mapped[dt.datetime] = mapped_column(TZ, nullable=False, server_default=func.now())
+    mode: Mapped[str] = mapped_column(String(8), nullable=False)
+    side: Mapped[str] = mapped_column(String(4), nullable=False)
+    token_symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    mint: Mapped[str] = mapped_column(String(64), nullable=False)
+    token_program: Mapped[str | None] = mapped_column(String(64))
+    wallet: Mapped[str] = mapped_column(String(64), nullable=False)
+    # The quote: what the swap would have moved.
+    qty: Mapped[Decimal] = mapped_column(QTY, nullable=False)
+    usd_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    price: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    price_impact_pct: Mapped[Decimal | None] = mapped_column(Numeric(18, 10))
+    slippage_bps: Mapped[int] = mapped_column(Integer, nullable=False)
+    route: Mapped[str | None] = mapped_column(String(256))
+    # The transaction Jupiter built, and what it would cost to send.
+    compute_unit_limit: Mapped[int | None] = mapped_column(Integer)
+    priority_fee_lamports: Mapped[int | None] = mapped_column(BigInteger)
+    base_fee_lamports: Mapped[int | None] = mapped_column(BigInteger)
+    ata_exists: Mapped[bool | None] = mapped_column(Boolean)
+    ata_rent_lamports: Mapped[int | None] = mapped_column(BigInteger)
+    gas_lamports: Mapped[int | None] = mapped_column(BigInteger)
+    sol_usd: Mapped[Decimal | None] = mapped_column(MONEY)
+    gas_usd: Mapped[Decimal | None] = mapped_column(MONEY)
+    jupiter_sim_error: Mapped[str | None] = mapped_column(Text)
+    rpc_sim_error: Mapped[str | None] = mapped_column(Text)
+    rpc_units_consumed: Mapped[int | None] = mapped_column(BigInteger)
+    signed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    signature: Mapped[str | None] = mapped_column(String(128))
+    last_valid_block_height: Mapped[int | None] = mapped_column(BigInteger)
+    # Close leg only.
+    broker_pnl: Mapped[Decimal | None] = mapped_column(MONEY)
+    chain_pnl: Mapped[Decimal | None] = mapped_column(MONEY)
+    version_b_pnl: Mapped[Decimal | None] = mapped_column(MONEY)
+    error: Mapped[str | None] = mapped_column(Text)
+

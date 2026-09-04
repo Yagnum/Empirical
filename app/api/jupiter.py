@@ -20,7 +20,9 @@ numbers. They are decoded with `parse_float=str`, so "220.23925284547732"
 reaches the ledger as exactly those digits and never passes through a
 binary float.
 
-NO SWAPS. This client never signs a transaction and never touches a wallet.
+NO SENDS. `build_swap` (ADR-025) asks Jupiter to assemble a swap transaction
+for the engine wallet; signing and simulating it is solana.py's job, and
+sending it is nobody's - shadow mode stops there.
 """
 
 from __future__ import annotations
@@ -223,6 +225,58 @@ def executable_price(token: dict, side: str, qty: Decimal) -> dict:
         "token_amount": tokens,
         "price_impact_pct": str(body.get("priceImpactPct") or "0"),
     }
+
+
+SWAP_URL = "https://api.jup.ag/swap/v1/swap"
+LITE_SWAP_URL = "https://lite-api.jup.ag/swap/v1/swap"
+
+
+def build_swap(quote: dict, user_pubkey: str) -> dict:
+    """POST swap/v1/swap - turn a quote into an unsigned transaction.
+
+    Jupiter assembles the instructions (create the token account if the
+    wallet lacks one, wrap SOL if needed, the swap itself), sets a compute
+    budget, proposes a priority fee, and runs its own simulation - the
+    result rides back as `simulationError` when it fails, which on an empty
+    wallet it does. Returns the body: `swapTransaction` (base64),
+    `computeUnitLimit`, `prioritizationFeeLamports`, `lastValidBlockHeight`,
+    `simulationError`. Nothing is sent.
+
+    The quote was decoded with numbers as text (ADR-010); the one float
+    Jupiter insists on getting back as a float is restored here.
+    """
+    payload = dict(quote)
+    if isinstance(payload.get("timeTaken"), str):
+        try:
+            payload["timeTaken"] = float(payload["timeTaken"])
+        except ValueError:
+            payload.pop("timeTaken", None)
+    body = {
+        "quoteResponse": payload,
+        "userPublicKey": user_pubkey,
+        "wrapAndUnwrapSol": True,
+        "dynamicComputeUnitLimit": True,
+        "prioritizationFeeLamports": {
+            "priorityLevelWithMaxLamports": {"maxLamports": 1_000_000, "priorityLevel": "medium"}
+        },
+    }
+    url = SWAP_URL if settings.jup_api_key else LITE_SWAP_URL
+    headers = {"accept": "application/json", "content-type": "application/json"}
+    if settings.jup_api_key and url.startswith("https://api.jup.ag"):
+        headers["x-api-key"] = settings.jup_api_key
+    try:
+        with httpx.Client(timeout=settings.http_timeout_seconds) as client:
+            response = client.post(url, json=body, headers=headers)
+    except httpx.TimeoutException as exc:
+        raise JupiterError("jupiter swap builder timed out") from exc
+    except httpx.HTTPError as exc:
+        raise JupiterError(f"jupiter swap builder unreachable: {exc}") from exc
+    if response.status_code != 200:
+        raise JupiterError(f"jupiter swap builder HTTP {response.status_code}: {response.text[:200]}", response.status_code)
+    result = response.json()
+    if not isinstance(result, dict) or not result.get("swapTransaction"):
+        raise JupiterError("jupiter swap builder returned no transaction")
+    return result
 
 
 # The fixed notional the sampler prices the spread at (ADR-020). One size

@@ -64,6 +64,7 @@ def shape_trade(trade: WeekendTrade) -> dict:
         "fees": _fmt(trade.fees),
         "state": trade.state,
         "simulated": trade.simulated,
+        "source": trade.source,
         "settlement_mode": trade.settlement_mode,
         "injected_gap": _fmt(trade.injected_gap),
         "hedge_order_id": trade.hedge_order_id,
