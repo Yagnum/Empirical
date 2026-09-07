@@ -824,3 +824,39 @@ unattended turn at 8:07 PM ET tonight once `GROQ_API_KEY` is set. About
 dozens of open trades. New tables `sim_users`, `sim_decisions`; script
 `scripts/sim_users.py`; workflow `sim-users.yml`; doc `SIM-USERS.md`.
 
+---
+
+## ADR-027 — Azure App Service Free tier for both apps; Neon stays; Clerk development instance until a domain exists
+
+**Date**: 2026-09-07 · **Status**: Accepted
+
+**Context**: The owner chose to deploy now rather than after the app is
+finished. Three choices were put to them: hosting (Container Apps, App
+Service B1, or App Service F1), domain (none yet), and database (keep
+Neon or move to Azure Postgres).
+
+**Decision**: **Two web apps on one Linux App Service plan, tier F1
+(free)**: `yagnum-api` (Python 3.13, source zip, requirements installed
+on the server) and `yagnum-web` (Node 22, prebuilt Next.js standalone
+zip). **Neon stays the database** — it is already the one the GitHub
+crons and the simulated traders write to, and one database beats two.
+**Clerk stays on the development instance**: production instances need a
+domain, F1 cannot take one, and the Azure address works with the
+development keys (Clerk's development badge shows). **`APP_ENV=production`
+and `ALLOW_TOKENS_WITHOUT_AZP=false`** on the deployed API: the weekend
+simulator switch and injected settlement do not exist on the public site.
+The engine wallet's public key is deployed; its secret key is not.
+
+The first deployment is `scripts/azure/first-deploy.sh` (reads `.env`,
+creates and configures everything, deploys); later pushes to `main`
+redeploy through `.github/workflows/deploy-azure.yml` with publish
+profiles. Nothing is configured in the portal by hand.
+
+**Consequences**: $0 a month. The apps sleep after 20 idle minutes and
+take 10–30 s to wake; each has 60 CPU-minutes a day, which a long demo
+with the dashboard polling can exhaust. When a domain arrives, the plan
+moves to B1 (~$13/app/month) for the custom domain and always-on, and
+Clerk gets its production instance per PRODUCTION.md. PRODUCTION.md's
+"Azure Database for PostgreSQL" row is superseded by this ADR. Guide:
+`docs/AZURE-DEPLOY.md`.
+

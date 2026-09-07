@@ -46,7 +46,7 @@ the safety nets, so each removal must be deliberate.
 | `CLERK_SECRET_KEY` | `sk_test_…` | `sk_live_…` | Production instance key. |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | `pk_test_…` | `pk_live_…` | Same, for the frontend. |
 | `CLERK_WEBHOOK_SIGNING_SECRET` | empty | `whsec_…` | See §2. Empty means the webhook route refuses all events. |
-| `DATABASE_URL` / `DATABASE_URL_UNPOOLED` | Neon `development` branch | Azure Database for PostgreSQL | ADR-014: same engine, different host. Run `alembic upgrade head` against the unpooled URL at deploy time. |
+| `DATABASE_URL` / `DATABASE_URL_UNPOOLED` | Neon `development` branch | Neon, unchanged (ADR-027) | One database for the site, the crons and the sim. Migrations run from the laptop with `alembic upgrade head`; the deployed API never migrates. |
 | `ALPACA_*` | sandbox keys | sandbox keys (unchanged) | Yagnum stays a paper-trading app. There is no plan to hold real broker keys. |
 
 ## 4. Before the first outside user

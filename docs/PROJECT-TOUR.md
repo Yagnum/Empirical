@@ -352,8 +352,10 @@ and Backed's terms about US persons.
   securities (both JNLS directions "not enabled"), so the engine holds a
   ledger lock instead (ADR-022). Production asks Alpaca to enable JNLS and
   moves custody to the engine account that already exists.
-- **Azure deployment** — deliberately last (owner's call): ship when the
-  app is essentially done. The checklist is in
+- **A domain and Clerk's production instance** — the site deploys to
+  Azure's free tier on an `azurewebsites.net` address with the Clerk
+  development keys (ADR-027, [AZURE-DEPLOY.md](AZURE-DEPLOY.md)). A real
+  domain means the B1 tier and the checklist in
   [PRODUCTION.md](PRODUCTION.md).
 
 ---
@@ -369,7 +371,8 @@ and Backed's terms about US persons.
 | [SIZING-THE-RESERVE.md](SIZING-THE-RESERVE.md) | The statistics: σ, z, the bell curve from the ground up, where the data lives |
 | [JUPITER-FLOW.md](JUPITER-FLOW.md) | The token side: mints, decimals, quotes vs prices, the on-chain record |
 | [WEEKEND-SIMULATOR.md](WEEKEND-SIMULATOR.md) | ★ The engine's lifecycle with real numbers, and how to drive the simulator |
-| [DECISIONS.md](DECISIONS.md) | Every choice, numbered, with reasons — ADR-001 through ADR-026 |
+| [AZURE-DEPLOY.md](AZURE-DEPLOY.md) | How the site gets onto the internet, what the free tier can and cannot do |
+| [DECISIONS.md](DECISIONS.md) | Every choice, numbered, with reasons — ADR-001 through ADR-027 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The structural reference: routes, tables, phases |
 | `docs/postman/` | Every API call, sendable by hand |
 

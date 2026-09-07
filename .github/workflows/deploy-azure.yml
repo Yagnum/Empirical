@@ -1,0 +1,73 @@
+# Redeploy both apps to Azure App Service on every push to main that touches
+# them (ADR-027). The first deployment is done by hand with
+# scripts/azure/first-deploy.sh, which also creates the resources; this job
+# only ships code to what exists.
+#
+# Secrets (repository Settings -> Secrets and variables -> Actions):
+#   AZURE_WEBAPP_PUBLISH_PROFILE_API   from: az webapp deployment list-publishing-profiles -g yagnum-rg -n yagnum-api --xml
+#   AZURE_WEBAPP_PUBLISH_PROFILE_WEB   same, for yagnum-web
+#   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY  baked into the web bundle at build time
+#
+# The web app is built here, not on the server: the Free tier has 1 GB and
+# cannot run a Next.js build. The API is shipped as source and App Service
+# installs requirements.txt on the server.
+name: Deploy to Azure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "scripts/azure/**"
+      - ".github/workflows/deploy-azure.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-azure
+  cancel-in-progress: true
+
+jobs:
+  api:
+    if: github.repository_owner == 'Yagnum'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python scripts/azure/package.py api
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: yagnum-api
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_API }}
+          package: build/api.zip
+
+  web:
+    if: github.repository_owner == 'Yagnum'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/web/package-lock.json
+      - run: npm ci
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_CLERK_SIGN_IN_URL: /sign-in
+          NEXT_PUBLIC_CLERK_SIGN_UP_URL: /sign-up
+          NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: /dashboard
+          NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: /onboarding
+      - run: python3 ../../scripts/azure/package.py web
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: yagnum-web
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_WEB }}
+          package: build/web.zip

@@ -11,3 +11,6 @@ __pycache__/
 # Node
 node_modules/
 .neon
+
+# Azure deploy packages (scripts/azure/package.py)
+build/
