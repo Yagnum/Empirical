@@ -123,18 +123,12 @@ Note the pattern. In every case, the trader ends at Monday's price plus or minus
 
 ### 3f. What Alice actually gets
 
-> **Amended 2026-09-07 (ADR-028).** The paragraphs below describe the
-> pass-through of ADR-017, which the engine ran from Aug 31 to Sep 7. As of
-> ADR-028 the engine runs the paper's design: **Alice's weekend price is
-> final.** She still posts the ERR escrow, and it comes back to her in full
-> on Monday. The gap between $226 and Monday's fill is Yagnum's, offset by
-> the on-chain hedge (ADR-025, in shadow for now). In the five cases of §3e
-> that means: Alice nets exactly 10 × $226 every time; Yagnum books +$30,
-> −$30, or in Case 5 −$120, which exceeds the $107 reserve and marks the
-> trade `breached` on Yagnum's side. The adverse-selection argument below
-> is the risk Yagnum now carries on purpose, and the hedge is its answer.
+> **Note, 2026-09-07 (ADR-029).** For a few hours the engine locked the
+> weekend price and kept the gap (ADR-028). That was a misreading of this
+> section, caught by the owner and reverted the same day. The text below
+> is the design as built and running.
 
-This was the plain statement of the design under ADR-017. Under the reconciliation, the weekend trader's final price is **always the first regulated-market price**. The weekend execution is **provisional**: it is a placeholder until the real share trades. What Alice gains is **immediacy** and **guaranteed settlement**. She gets her cash (or her tokens) on Saturday, and her trade is guaranteed to settle into regulated custody. What she does **not** get is a locked weekend price. And she does **not** hand Monday's risk to Yagnum. If NVDA falls over the weekend, Alice's sale nets the lower Monday price. Yagnum is a neutral bridge. It ends flat on every trade by design.
+This is the plain statement of the design, recorded as ADR-017. Under the reconciliation, the weekend trader's final price is **always the first regulated-market price**. The weekend execution is **provisional**: it is a placeholder until the real share trades. What Alice gains is **immediacy** and **guaranteed settlement**. She gets her cash (or her tokens) on Saturday, and her trade is guaranteed to settle into regulated custody. What she does **not** get is a locked weekend price. And she does **not** hand Monday's risk to Yagnum. If NVDA falls over the weekend, Alice's sale nets the lower Monday price. Yagnum is a neutral bridge. It ends flat on every trade by design.
 
 Why not the alternative? Yagnum could quote Alice a firm $226 on Saturday, charge a fee, and carry the gap itself. That was rejected. **Adverse selection** means the people most eager to trade with you are the ones who know something you do not. On a weekend, that is exactly who trades: people reacting to weekend news. Their flow pushes the gap systematically against the party quoting the firm price. And that party cannot protect itself, because the market it would hedge in is closed. This is the classic market-maker adverse-selection problem. A fee cannot fix it, because the informed traders would pay the fee only when it is worth it to them. So Yagnum does not quote prices. It passes the real price through.
 

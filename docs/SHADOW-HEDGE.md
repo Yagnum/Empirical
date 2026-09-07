@@ -91,10 +91,10 @@ version_b_pnl  = broker_pnl + chain_pnl − gas of both legs
 ```
 
 In words: the share leg gains what the token leg loses, minus the spread
-crossed twice, minus gas. Since ADR-028 the share leg is no longer
-hypothetical: `broker_pnl` equals the trade's `yagnum_pnl`, the gap Yagnum
-actually carried, and `version_b_pnl` is what it would have kept had the
-hedge been sent. If the token tracks the share perfectly the two
+crossed twice, minus gas. Note (ADR-029): a firm weekend price is the
+alternative the paper rejects, so these columns price a product Yagnum
+does not offer. They are the measured version of the paper's §3f
+argument, kept as an experiment. If the token tracks the share perfectly the two
 big terms cancel and Version B costs exactly the spread plus gas per trade.
 Where they do not cancel is the tracking error, and that is what the rows
 will measure.

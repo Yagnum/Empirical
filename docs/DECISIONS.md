@@ -864,8 +864,8 @@ Clerk gets its production instance per PRODUCTION.md. PRODUCTION.md's
 
 ## ADR-028 — Version B: the weekend price is the trader's final price; the escrow returns in full; the gap is Yagnum's
 
-**Date**: 2026-09-07 · **Status**: Accepted · **Supersedes** the pass-through
-half of ADR-017
+**Date**: 2026-09-07 · **Status**: **Reverted the same day by ADR-029.**
+Kept as the record of a misreading. Nothing settled under it.
 
 **Context**: ADR-017 made the ERR a pass-through: the trader always ended
 at Monday's price and Yagnum stayed flat. It was honest and it worked, but
@@ -910,4 +910,45 @@ landing page describes the product as it now behaves. `docs/YAGNUM-EXPLAINED.md`
 point here. The Version B question the shadow hedge answers becomes: on
 the trades Yagnum actually carried, would the hedge have covered the gap
 after spread and gas?
+
+---
+
+## ADR-029 — The paper is pass-through. ADR-028 reverted; the ERR refunds gains and takes losses, as written
+
+**Date**: 2026-09-07 · **Status**: Accepted · **Reverts** ADR-028; **restores**
+ADR-017's reconciliation as the paper's own
+
+**Context**: The owner caught it on the landing page within an hour:
+"doesn't the paper say we give back the profits or take away the losses
+from them?" It does. The proposal's §3c–3e: Yagnum takes the contra side
+on Saturday, closes it at the broker on Monday, and `ERR_final =
+ERR_initial + P&L_net` is refunded — the trader ends at Monday's price
+plus or minus fees, Yagnum ends flat, and "Yagnum keeps neither the gain
+nor the loss. It passes both through." That is what the engine ran from
+Aug 31 to this morning. The "Version B" of ADR-025/028 — a firm weekend
+price with Yagnum keeping the gap — is the alternative the paper's §3f
+rejects on adverse-selection grounds, not the paper. The assistant
+conflated "the paper's hedge" (the Monday broker leg, which the engine
+already runs) with an on-chain price guarantee.
+
+**Decision**: **The reconciliation is the paper's: pass-through.** The
+escrow returns as `reserve + qty × (p_close − p_open)` for a sell (sign
+flipped for a buy); a gap beyond the reserve is `breached` and the excess
+is debited (ADR-017). The `design` and `yagnum_pnl` columns are dropped;
+no row ever settled under ADR-028. The ticket, the trades panel, the
+personas' rules and the landing page say what the paper says, and the
+moved amount is coloured: green came back, red came out of the reserve.
+
+**What stays from ADR-025.** The shadow on-chain hedge is not the paper's
+design either, but it is useful data: for every trade it records what a
+firm-price product would have cost Yagnum in spread, gas and tracking
+error. That is the number behind the paper's §3f argument, measured
+instead of asserted. It stays, relabelled as an experiment, not a step
+toward a product decision.
+
+**Consequences**: One day's detour, fully reverted, with the numbers on
+the landing page corrected to the engine's real settlement (trade 7:
+reserve $46.87, a +1% Monday, $51.49 returned). The lesson is recorded so
+it is not repeated: when the owner says "Version B", read the paper's
+section before building.
 

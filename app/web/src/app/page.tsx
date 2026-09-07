@@ -17,15 +17,15 @@ import { Wordmark } from "@/components/wordmark";
 const STEPS = [
   {
     title: "Trade at the token's live price",
-    body: "On a Saturday, NVDA has no price — but NVDAx, the token backed one-to-one by the share, trades on Jupiter around the clock. Yagnum quotes the executable price for your exact size, and that price is yours: sells are paid now, buys are yours now.",
+    body: "On a Saturday, NVDA has no price — but NVDAx, the token backed one-to-one by the share, trades on Jupiter around the clock. Yagnum quotes the executable price for your exact size and executes at it provisionally: sells are paid now, buys are yours now.",
   },
   {
     title: "A measured reserve is held",
-    body: "Part of the trade's value is set aside until the market reopens. It is sized per stock from two years of Friday-to-Monday gaps, times a multiplier measured across every recorded token-weekend — typically three to ten percent. It is your money and it comes back in full.",
+    body: "Part of the trade's value is set aside until the market reopens. It is sized per stock from two years of Friday-to-Monday gaps, times a multiplier measured across every recorded token-weekend — typically three to ten percent. It is your money, and it comes back adjusted by the weekend's move.",
   },
   {
     title: "Monday, the real shares settle",
-    body: "At the first regulated print the real shares move in your brokerage account. Your weekend price stands. The difference between it and Monday's fill is Yagnum's to carry, hedged on Solana — and every journal, order and hedge leg is on your statement.",
+    body: "At the first regulated print the real shares move in your brokerage account, and the trade settles at that price: the reserve comes back bigger if the market moved your way, smaller if not. You end at Monday's price, Yagnum ends flat, and every journal and order is on your statement.",
   },
 ];
 
@@ -76,9 +76,9 @@ export default async function LandingPage() {
               The stock market sleeps every weekend. Tokenized shares on Solana
               do not. Yagnum lets you buy or sell real U.S. stocks on a Saturday
               at that live price, holds a measured reserve until Monday, and
-              settles the real shares the moment the market reopens — a
-              settlement layer between decentralised markets and a regulated
-              brokerage account.
+              settles the real shares at the first regulated price the moment
+              the market reopens — a settlement layer between decentralised
+              markets and a regulated brokerage account.
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-3">
               <Link href="/sign-up" className={buttonStyles("primary")}>
@@ -134,7 +134,7 @@ export default async function LandingPage() {
             </p>
             <dl className="mt-10 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
               {FACTS.map((fact) => (
-                <div key={fact.label} className="border-l-2 border-accent/30 pl-5">
+                <div key={fact.label} className="flex flex-col border-l-2 border-accent/30 pl-5">
                   <dt className="order-last text-[14px] leading-snug text-ink-soft">
                     {fact.label}
                   </dt>
@@ -151,7 +151,7 @@ export default async function LandingPage() {
                   What Yagnum is
                 </h3>
                 <p className="mt-2 text-[15px] leading-relaxed text-ink-soft">
-                  A settlement layer. It reads prices and hedges on Jupiter, a
+                  A settlement layer. It reads live prices on Jupiter, a
                   Solana exchange, and settles real shares through a regulated
                   brokerage. It brings the two together for the hours the
                   market does not serve, and keeps a ledger a statement can be

@@ -292,12 +292,6 @@ class WeekendTrade(Base):
     # persona, ADR-026). Research queries filter on this; it never changes
     # how the engine treats the trade.
     source: Mapped[str] = mapped_column(String(8), nullable=False, default="user", server_default="user")
-    # Which settlement design the trade closed under (ADR-028):
-    #   "A"  pass-through: the trader ended at Monday's price, the escrow
-    #        came back adjusted by the gap (ADR-017; rows before 2026-09-07)
-    #   "B"  locked price: the trader keeps the weekend price, the escrow
-    #        comes back in full, and the gap is Yagnum's (`yagnum_pnl`)
-    design: Mapped[str] = mapped_column(String(1), nullable=False, default="B", server_default="B")
     # Alpaca journal ids: the escrow in, the sell-side advance out.
     escrow_journal_id: Mapped[str | None] = mapped_column(String(64))
     advance_journal_id: Mapped[str | None] = mapped_column(String(64))
@@ -312,10 +306,6 @@ class WeekendTrade(Base):
     true_up: Mapped[Decimal | None] = mapped_column(MONEY)
     escrow_returned: Mapped[Decimal | None] = mapped_column(MONEY)
     shortfall: Mapped[Decimal | None] = mapped_column(MONEY)
-    # Design B: what the weekend gap did to Yagnum's book, signed from
-    # Yagnum's side. qty x (p_close - p_open) for a customer sell (the firm
-    # advanced p_open and collected p_close), the reverse for a buy.
-    yagnum_pnl: Mapped[Decimal | None] = mapped_column(MONEY)
     created_at: Mapped[dt.datetime] = mapped_column(
         TZ, nullable=False, server_default=func.now(), index=True
     )

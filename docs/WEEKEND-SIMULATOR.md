@@ -77,13 +77,6 @@ weekend, account `0ac3…`):
    regular ticket, a second weekend sell, and reset-balance all refuse to
    touch them until the engine sells them Monday.
 
-> **Amended 2026-09-07 (ADR-028).** Steps 5–6 below are the pass-through
-> the engine ran until Sep 7. Since ADR-028 the escrow comes back **in
-> full** ($44.86, not $44.41), your price is the $219.98 you sold at, and
-> the 2 × ($219.76 − $219.98) = −$0.44 is Yagnum's. The crash test in §4
-> reads the same way: the $22.44 reserve returns whole, the −$26.41 lands
-> on Yagnum's book, and `breached` marks that it exceeded the reserve.
-
 **Settle — the market reopens (in the simulator: it never closed).**
 On a real Monday this runs by itself: the settlement cron (ADR-023) fires
 every ten minutes from 8:00 AM ET. In the simulator you press the button.

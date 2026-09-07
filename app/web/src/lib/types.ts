@@ -152,13 +152,6 @@ export type WeekendTrade = {
   true_up: string | null;
   escrow_returned: string | null;
   shortfall: string | null;
-  /**
-   * "B" (ADR-028): the weekend price is locked, the escrow returns in full
-   * and the gap is Yagnum's (`yagnum_pnl`). "A": rows from before
-   * 2026-09-07 that settled at Monday's price with the escrow adjusted.
-   */
-  design: "A" | "B";
-  yagnum_pnl: string | null;
   created_at: string | null;
   settled_at: string | null;
   events?: WeekendTradeEvent[];

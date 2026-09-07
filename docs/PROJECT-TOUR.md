@@ -149,12 +149,10 @@ your account into the firm account; your notional is journaled *to* you —
 **you sold now, you are paid now**; that immediacy is the product.
 Settling: your real shares sell at the broker; the fill is `p_close`, the
 first regulated price; the proceeds repay the advance; and the escrow
-returned — **in full, since ADR-028** (until Sep 7 it returned adjusted
-by `qty × (p_close − p_open)` so you ended at the regulated price and
-Yagnum stayed flat; now your weekend price is final and that gap is
-Yagnum's, recorded as `yagnum_pnl`). `breached` now means the gap cost
-Yagnum more than the reserve was sized for: a mark on Yagnum's book, never
-a debit to you.
+returns as `reserve + qty × (p_close − p_open)` — so you always end at the
+regulated price (ADR-017, the paper's own rule) and Yagnum always ends
+flat. If the gap eats more than the whole reserve, the trade is `breached`
+and the excess is debited: escrow is collateral, not a cap.
 
 Three technical choices worth understanding:
 
@@ -350,14 +348,18 @@ stays the database, GitHub keeps the crons. One script created and
 configured everything from `.env`; a push to `main` redeploys. $0 a month,
 with a $1 budget alert as proof. [AZURE-DEPLOY.md](AZURE-DEPLOY.md).
 
-**Version B, for real.** The owner's call: the weekend price is the
-trader's final price. The escrow is still posted and comes back in full;
-the gap between Saturday's price and Monday's fill is Yagnum's, recorded
-on every trade, and `breached` now means "the gap exceeded what the
-reserve was sized for" on Yagnum's side. The on-chain hedge that is meant
-to cover that gap stays in shadow until the wallet question is settled.
-The landing page now says what the product does. ADR-028 states the
-adverse-selection risk this accepts.
+**A one-day misreading, corrected.** For a few hours the engine locked
+the weekend price and kept the gap (ADR-028). The owner caught it from
+the landing page: the paper refunds gains and takes losses through the
+ERR, so the trader ends at Monday's price and Yagnum ends flat — which is
+what the engine had run since Aug 31. Reverted the same day (ADR-029);
+nothing settled under it. The shadow on-chain hedge stays as an
+experiment: it prices the firm-price alternative the paper rejects.
+
+**The landing page** now leads with the paper: the closed market, the
+token's live price, the measured reserve, Monday's settlement, and a
+specimen weekend trade with the engine's own numbers — the $4.62 the
+market rose coming back inside the reserve, in green.
 
 ---
 
@@ -403,10 +405,10 @@ adverse-selection risk this accepts.
 
 1. What is the only thing the weekend simulator fakes? *(The calendar.)*
 2. A customer weekend-sells and the price falls 1% by Monday. Walk the
-   cash: who pays what, when? *(They are paid Saturday's price
-   immediately and that is their price. Monday the real sale fills 1%
-   lower; their whole reserve comes back; the 1% is Yagnum's loss on its
-   book — ADR-028 — which the on-chain hedge is meant to offset.)*
+   cash: who pays what, when? *(They are advanced Saturday's price
+   immediately; Monday the real sale fills 1% lower; the 1% comes out of
+   their reserve at release. They end at Monday's price — the paper's
+   rule — but they had the cash two days early.)*
 3. Why is Invariant 1 "a query, not a promise"? *(Escrow moves are real
    tagged journals at the broker; summing them proves coverage without
    trusting our own bookkeeping.)*

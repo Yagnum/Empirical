@@ -18,11 +18,11 @@ import type { WeekendSession, WeekendTrade } from "@/lib/types";
   Every weekend trade this account has made, and where each one stands.
 
   The state machine on screen: open (weekend) -> settling -> settled or
-  reserve exceeded. Open trades carry the settle controls; settled ones
-  show the reconciliation — the fill, what came back, and what the weekend
-  cost Yagnum — because the whole point of the engine is that this
-  arithmetic is inspectable. Under ADR-028 the trader's price is locked, so
-  "exceeded" is a mark on Yagnum's book, never a debit to the trader.
+  reserve breached. Open trades carry the settle controls; settled ones
+  show the reconciliation — the fill, the move, what came back — because
+  the whole point of the engine is that this arithmetic is inspectable.
+  The paper's rule: the trader ends at Monday's price; the reserve comes
+  back bigger if the market moved their way, smaller if not.
 
   The injected-gap control is the simulator's crash-test lever and renders
   only when the API says the dev toggle exists. It answers the question a
@@ -34,7 +34,7 @@ const STATE_LABEL: Record<WeekendTrade["state"], string> = {
   provisional: "Open (weekend)",
   awaiting_settlement: "Settling",
   settled: "Settled",
-  breached: "Reserve exceeded",
+  breached: "Reserve breached",
 };
 
 export function WeekendTradesPanel({
@@ -62,7 +62,7 @@ export function WeekendTradesPanel({
         title="Weekend trades"
         aside={
           <span className="text-[12px] text-ink-faint">
-            your weekend price is final
+            settle at the first real price
           </span>
         }
       />
@@ -152,12 +152,10 @@ function formatGap(fraction: string | null): string {
 }
 
 /**
- * One plain sentence per state. No engine vocabulary: "escrow", "true-up"
- * and "gap" stay in the API; the reader gets what happened to their money
- * and why. Design B (ADR-028): the weekend price is the trader's final
- * price, the reserve always comes back whole, and the weekend's move is
- * Yagnum's. Rows that settled under design A (before 2026-09-07) keep
- * their old story.
+ * One plain sentence per state. No engine vocabulary: "true-up", "escrow"
+ * and "shortfall" stay in the API; the reader gets what happened to their
+ * money and why. The move is coloured the way a statement colours it:
+ * green came back to you, red came out of the reserve.
  */
 function Outcome({ trade }: { trade: WeekendTrade }) {
   const reserve = formatUsd(trade.reserve);
@@ -166,9 +164,9 @@ function Outcome({ trade }: { trade: WeekendTrade }) {
     return (
       <>
         {trade.side === "sell"
-          ? "Your price is final and the cash is in your account; the shares are set aside and sell for real when the market reopens."
-          : "Your price is final and the shares are paid for; they are bought for real when the market reopens."}{" "}
-        The {reserve} reserve is held until then and comes back in full.
+          ? "The cash is in your account and the shares are set aside — they sell for real when the market reopens."
+          : "Your price is locked for now and paid."}{" "}
+        The {reserve} reserve waits for the market to reopen.
       </>
     );
   }
@@ -185,91 +183,56 @@ function Outcome({ trade }: { trade: WeekendTrade }) {
             </span>)
           </>
         ) : null}
-        . Whatever it fills at, your price stays {formatUsd(trade.p_open)}.
+        . When it fills, the trade settles at that price.
       </>
     );
   }
 
-  if (trade.design === "A") {
-    return <OutcomeDesignA trade={trade} />;
-  }
-
-  // Settled or exceeded under design B: the reserve came back whole and the
-  // gap is Yagnum's. Show the gap from Yagnum's side, signed.
-  const gap = toNumber(trade.yagnum_pnl) ?? 0;
-  const gapText = (
-    <span className={`figure-nums ${gap < 0 ? "text-loss" : "text-gain"}`}>
-      {gap < 0 ? "−" : "+"}
-      {formatUsd(Math.abs(gap))}
-    </span>
-  );
-
-  if (trade.state === "breached") {
-    return (
-      <>
-        You kept your price and your whole {reserve} reserve came back. The
-        market reopened far enough from it that Yagnum&rsquo;s side of the
-        trade lost {gapText}, more than the reserve was sized for. That loss
-        is Yagnum&rsquo;s, not yours.
-      </>
-    );
-  }
-
-  if (Math.abs(gap) < 0.005) {
-    return (
-      <>
-        You kept your price and your whole {reserve} reserve came back. The
-        market reopened where you traded, so the weekend cost Yagnum nothing.
-      </>
-    );
-  }
-  return (
-    <>
-      You kept your price and your whole {reserve} reserve came back. The
-      market reopened {gap < 0 ? "against" : "in favour of"} Yagnum&rsquo;s
-      side of the trade: {gapText} on its book, out of a reserve sized at{" "}
-      {reserve}.
-    </>
-  );
-}
-
-/** The pass-through story for rows that settled before ADR-028. */
-function OutcomeDesignA({ trade }: { trade: WeekendTrade }) {
-  const reserve = formatUsd(trade.reserve);
   if (trade.state === "breached") {
     return (
       <>
         The price moved further than the whole reserve covered: all{" "}
         <span className="figure-nums text-ink">{reserve}</span> was used and{" "}
-        <span className="figure-nums text-loss">{formatUsd(trade.shortfall)}</span>{" "}
-        more came out of your cash. You ended at the settlement price.
+        <span className="figure-nums text-loss">−{formatUsd(trade.shortfall)}</span>{" "}
+        more came out of your cash. You still ended at the settlement price —
+        the reserve is a cushion, not a limit.
       </>
     );
   }
+
+  // Settled. Compare what came back with what was held: the difference IS
+  // the weekend's price move, and which side of the reserve it landed on.
   const held = toNumber(trade.reserve) ?? 0;
   const returned = toNumber(trade.escrow_returned) ?? 0;
   const diff = returned - held;
   const returnedText = (
     <span className="figure-nums text-ink">{formatUsd(trade.escrow_returned)}</span>
   );
+
   if (Math.abs(diff) < 0.005) {
-    return <>You ended at the real market price. The price barely moved, so your whole {reserve} reserve came back.</>;
+    return (
+      <>
+        You ended at the real market price. The price barely moved, so your
+        whole {reserve} reserve came back.
+      </>
+    );
   }
   if (diff < 0) {
     return (
       <>
         You ended at the real market price. The{" "}
-        <span className="figure-nums">{formatUsd(-diff)}</span> the price moved
-        against you came out of the reserve: {returnedText} of {reserve} came back.
+        <span className="figure-nums text-loss">−{formatUsd(-diff)}</span> the
+        price moved against you came out of the reserve: {returnedText} of{" "}
+        {reserve} came back.
       </>
     );
   }
   return (
     <>
-      You ended at the real market price, better than your weekend price. The
+      You ended at the real market price — better than your weekend price. The
       full {reserve} reserve came back plus the{" "}
-      <span className="figure-nums">{formatUsd(diff)}</span> the price moved
-      your way: {returnedText} in all.
+      <span className="figure-nums text-gain">+{formatUsd(diff)}</span> the
+      price moved your way: {returnedText} in all.
     </>
   );
 }
