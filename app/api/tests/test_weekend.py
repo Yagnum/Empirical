@@ -422,20 +422,24 @@ def test_injected_gap_settles_with_true_up(db_client, broker):
     assert response.status_code == 200, response.text
     settled = response.json()
 
-    # p_close = 200 * 0.95 = 190; true-up = 2 * (190 - 200) = -20;
-    # released = 40.78 - 20 = 20.78. The trader ended at the Monday price.
+    # p_close = 200 * 0.95 = 190. Design B (ADR-028): the trader's 200 is
+    # locked, the whole 40.78 escrow comes back, and the 2 * (190 - 200)
+    # = -20 gap is Yagnum's.
+    assert settled["design"] == "B"
     assert settled["state"] == "settled"
     assert settled["p_close"] == "190"
-    assert settled["true_up"] == "-20"
-    assert settled["escrow_returned"] == "20.78"
+    assert settled["true_up"] == "0"
+    assert settled["escrow_returned"] == "40.78"
+    assert settled["yagnum_pnl"] == "-20"
     assert settled["shortfall"] is None
 
     # Injected mode moves only the escrow: one journal, firm -> trader.
     assert len(broker.journals) == 1
     assert broker.journals[0]["from"] == "firm-0001"
-    assert broker.journals[0]["amount"] == "20.78"
+    assert broker.journals[0]["amount"] == "40.78"
+    assert "in full" in broker.journals[0]["description"]
     kinds = [event["kind"] for event in settled["events"]]
-    assert "gap_injected" in kinds and "escrow_released" in kinds
+    assert "gap_injected" in kinds and "escrow_released" in kinds and "gap_absorbed" in kinds
     assert "hedge_swept" not in kinds
 
 
@@ -448,14 +452,19 @@ def test_injected_gap_beyond_the_reserve_breaches(db_client, broker):
     )
     settled = response.json()
 
-    # true-up = 2 * (160 - 200) = -80 > the 40.78 reserve: breached, and the
-    # 39.22 excess is debited - collateral, not a cap (ADR-017).
+    # The gap 2 * (160 - 200) = -80 is bigger than the 40.78 the reserve was
+    # sized for: breached - on Yagnum's book (ADR-028). The trader keeps 200
+    # and the whole escrow; nothing is ever debited from them.
     assert settled["state"] == "breached"
-    assert settled["escrow_returned"] == "0"
-    assert settled["shortfall"] == "39.22"
-    assert broker.journals[0]["from"] == "acct-test-0001"
-    assert broker.journals[0]["amount"] == "39.22"
-    assert "shortfall" in broker.journals[0]["description"]
+    assert settled["escrow_returned"] == "40.78"
+    assert settled["shortfall"] is None
+    assert settled["yagnum_pnl"] == "-80"
+    assert len(broker.journals) == 1
+    assert broker.journals[0]["from"] == "firm-0001"
+    assert broker.journals[0]["to"] == "acct-test-0001"
+    assert broker.journals[0]["amount"] == "40.78"
+    kinds = [event["kind"] for event in settled["events"]]
+    assert "breached" in kinds and "shortfall_debited" not in kinds
 
 
 def test_injected_mode_requires_a_gap_and_development(db_client, broker, monkeypatch):
@@ -489,12 +498,14 @@ def test_market_settlement_in_regular_hours(db_client, broker, monkeypatch):
     assert "extended_hours" not in broker.orders[0]
     assert settled["state"] == "settled"
     assert settled["p_close"] == "195"
-    # Sweep 2*195 = 390 to the firm, then release 40.78 - 10 = 30.78.
+    # Sweep 2*195 = 390 to the firm, then release the whole 40.78 (ADR-028).
+    # The firm advanced 400 and collected 390: Yagnum's P/L is -10.
     assert broker.journals[0]["to"] == "firm-0001"
     assert broker.journals[0]["amount"] == "390.00"
     assert broker.journals[1]["from"] == "firm-0001"
-    assert broker.journals[1]["amount"] == "30.78"
-    assert settled["escrow_returned"] == "30.78"
+    assert broker.journals[1]["amount"] == "40.78"
+    assert settled["escrow_returned"] == "40.78"
+    assert settled["yagnum_pnl"] == "-10"
 
 
 def test_market_settlement_after_hours_uses_marketable_limit(db_client, broker, monkeypatch):

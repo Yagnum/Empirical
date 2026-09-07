@@ -69,7 +69,9 @@ the current session and the answer format.
    hold}, symbol on the watchlist, quantity positive, at most 100 shares
    and $10,000. Anything else is stored as an unusable answer and nothing
    happens.
-4. **Route.** Weekend: `weekend.open_trade` with `source="sim"`. Regular
+4. **Route.** Weekend: `weekend.open_trade` with `source="sim"` (the
+   rules the persona reads say the weekend price is final and the reserve
+   returns whole, per ADR-028). Regular
    hours: a market day order. Premarket or after hours: a marketable limit
    day order in whole shares with `extended_hours`. Overnight: skipped,
    that window queues at the broker (ADR-024).

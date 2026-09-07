@@ -148,10 +148,10 @@ RULES = """
 HOW TRADING WORKS RIGHT NOW
 - Session "weekend": the stock market is closed. Your order goes through the ERR engine. A sell is priced at
   the token's executable bid on Jupiter and you are paid that cash immediately; a buy is priced at the ask
-  and you pay immediately. A reserve (the "reserve_pct" shown per symbol) is held from your cash until Monday.
-  When the market reopens your trade is settled at the real opening price: you end up at MONDAY'S price, not
-  the weekend quote, and the reserve comes back adjusted by the difference. If the price moves against you by
-  more than the reserve you owe the excess. Buys need cash for the notional plus the reserve.
+  and you pay immediately. THAT PRICE IS YOURS AND FINAL. A reserve (the "reserve_pct" shown per symbol) is
+  held from your cash until the market reopens and then returned to you in full. The difference between
+  your weekend price and Monday's real price is Yagnum's, not yours. Buys need cash for the notional plus
+  the reserve.
 - Session "regular": a normal market order at the broker, filled at the market.
 - Session "premarket" or "afterhours": a limit order at the broker in the extended session, whole shares only.
 - Session "overnight": you cannot trade in this window. Answer "hold".

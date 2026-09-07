@@ -72,6 +72,8 @@ def shape_trade(trade: WeekendTrade) -> dict:
         "true_up": _fmt(trade.true_up),
         "escrow_returned": _fmt(trade.escrow_returned),
         "shortfall": _fmt(trade.shortfall),
+        "design": trade.design,
+        "yagnum_pnl": _fmt(trade.yagnum_pnl),
         "created_at": trade.created_at.isoformat() if trade.created_at else None,
         "settled_at": trade.settled_at.isoformat() if trade.settled_at else None,
     }

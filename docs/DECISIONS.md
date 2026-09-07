@@ -860,3 +860,54 @@ Clerk gets its production instance per PRODUCTION.md. PRODUCTION.md's
 "Azure Database for PostgreSQL" row is superseded by this ADR. Guide:
 `docs/AZURE-DEPLOY.md`.
 
+---
+
+## ADR-028 — Version B: the weekend price is the trader's final price; the escrow returns in full; the gap is Yagnum's
+
+**Date**: 2026-09-07 · **Status**: Accepted · **Supersedes** the pass-through
+half of ADR-017
+
+**Context**: ADR-017 made the ERR a pass-through: the trader always ended
+at Monday's price and Yagnum stayed flat. It was honest and it worked, but
+it is not the paper's design, and the owner decided (ADR-025) to build
+toward the paper: a guaranteed weekend price covered by an on-chain hedge.
+ADR-025 built the hedge in shadow. This ADR flips the customer-facing
+half. Three choices were put to the owner: sequence (engine before the
+landing page), and what the trader pays for the locked price (a fee, an
+escrow, or both).
+
+**Decision**: **The weekend price is final.** A sell is paid `qty ×
+p_open` on Saturday and that is the trader's price; a buy is paid for at
+`p_open` and that is its cost. **The ERR escrow is still posted, and
+returns in full at settlement** — the owner chose escrow-only, no fee.
+**The gap `qty × (p_close − p_open)` is Yagnum's**, recorded per trade as
+`yagnum_pnl` and, in the sandbox, carried by the firm account. A trade is
+`breached` when Yagnum's loss on it exceeds the reserve it was sized with:
+a mark on Yagnum's book that the reserve model was exceeded, never a debit
+to the trader. Every trade now carries `design` ("A" for rows settled
+before today, "B" after), and the reconciliation keeps the A arithmetic so
+old rows read correctly.
+
+**What the escrow now does.** With the price locked the trader has no
+residual exposure, so the escrow absorbs nothing for them. Its role is the
+paper's collateral: the size the reserve model says the weekend can cost,
+held during the weekend and returned Monday. Yagnum's own reserve
+adequacy is now the research question the `breached` state answers.
+
+**The risk, stated.** ADR-017's reason for pass-through stands and is now
+accepted on purpose: weekend traders can be the informed ones, and the
+party quoting them a firm price cannot hedge in a closed regulated market.
+The on-chain hedge (ADR-025) is that party's defence, and it is still in
+shadow — so in the sandbox Yagnum carries the gap unhedged and the shadow
+legs record what the hedge would have returned. Funding the wallet and
+sending is a separate decision.
+
+**Consequences**: The engine's settlement journals change from "release =
+reserve + gap" to "release = reserve". The weekend ticket, the trades
+panel and the simulated traders' rules say "your price is final". The
+landing page describes the product as it now behaves. `docs/YAGNUM-EXPLAINED.md`
+§3f, `WEEKEND-SIMULATOR.md` §3–4 and `PROJECT-TOUR.md` §5 are amended to
+point here. The Version B question the shadow hedge answers becomes: on
+the trades Yagnum actually carried, would the hedge have covered the gap
+after spread and gas?
+

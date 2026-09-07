@@ -13,23 +13,26 @@ The story of one SELL, which is the flow everything else mirrors:
        now. The advance is the product: immediacy while every market is
        closed. State: `provisional`.
 
-  SETTLE (the next regulated session)
-    4. The hedge: the shares are sold at the broker for real. The fill
-       price is `p_close` - the first regulated price, which per ADR-017
-       is what the trader must end at.
+  SETTLE (the next regulated session) - design B, ADR-028
+    4. The shares are sold at the broker for real. The fill price is
+       `p_close`, the first regulated price.
     5. The fill's proceeds are swept to the firm (they repay the advance),
-       and the escrow comes back with the true-up:
-           released = reserve + qty * (p_close - p_open)
-       Price rose over the weekend -> the trader gets the rise on top of
-       the full reserve. Price fell -> the fall comes out of the reserve.
-       Net effect, always: the trader ended at `p_close`. Yagnum ends flat.
-    6. If the gap ate MORE than the reserve, `released` is negative: the
-       trade is `breached`, nothing comes back, and the excess is debited
-       from the account - escrow is collateral, not a cap (ADR-017).
+       and the escrow comes back IN FULL. The trader's price was locked at
+       `p_open` on Saturday and stays locked. The weekend gap,
+           yagnum_pnl = qty * (p_close - p_open)
+       is Yagnum's: the firm advanced p_open and collected p_close.
+    6. If the gap cost Yagnum MORE than the reserve was sized for, the
+       trade is `breached` - a mark on Yagnum's book that the reserve
+       model was exceeded, never a debit to the trader.
 
   A BUY is the mirror: the trader pays `qty * p_open` up front plus the
   reserve; settlement buys the shares for real, the firm reimburses the
-  fill, and the escrow returns with the true-up reversed in sign.
+  fill, and the escrow returns in full; Yagnum's P/L flips sign.
+
+  Rows from before 2026-09-07 carry `design = "A"` (ADR-017 pass-through:
+  the escrow returned adjusted by the gap and the trader ended at
+  p_close). `_reconcile` still knows that arithmetic so old rows read
+  correctly; no new row uses it.
 
   DEV-ONLY "injected" settlement skips step 4: `p_close` is chosen
   (p_open * (1 + gap)) instead of filled, and only the escrow half of the
@@ -414,6 +417,10 @@ def _reconcile(session: Session, trade: WeekendTrade, *, sweep: bool) -> Weekend
                 description=f"ERR hedge purchase reimbursed - {tag}",
             )
 
+    if trade.design == "B":
+        return _reconcile_locked(session, trade, p_close, done, tag)
+
+    # Design A (ADR-017), kept for rows that settled under it.
     true_up = trade.true_up if trade.true_up is not None else _true_up(trade, p_close)
     trade.true_up = true_up
     released = trade.reserve + true_up
@@ -458,6 +465,64 @@ def _reconcile(session: Session, trade: WeekendTrade, *, sweep: bool) -> Weekend
     trade.settled_at = dt.datetime.now(dt.timezone.utc)
     session.commit()
     if trade.state in ("settled", "breached") and "hedge_shadow_close" not in _event_kinds(session, trade):
+        _shadow_hedge(session, trade, "close")
+    return trade
+
+
+def _reconcile_locked(
+    session: Session, trade: WeekendTrade, p_close: Decimal, done: set[str], tag: str
+) -> WeekendTrade:
+    """Design B (ADR-028): the price is locked, the escrow returns whole,
+    and the gap lands on Yagnum's book."""
+    firm = _require_firm_account()
+    gap = _money(_true_up(trade, p_close))  # signed from the trader's side == Yagnum's P/L
+    trade.true_up = Decimal("0")
+    trade.yagnum_pnl = gap
+    trade.shortfall = None
+
+    if "escrow_released" not in done:
+        _journal(
+            session,
+            trade,
+            from_account=firm,
+            to_account=trade.alpaca_account_id,
+            amount=trade.reserve,
+            kind="escrow_released",
+            description=f"ERR escrow returned in full - price locked - {tag}",
+        )
+    trade.escrow_returned = _money(trade.reserve)
+
+    if "gap_absorbed" not in done:
+        _event(
+            session,
+            trade,
+            "gap_absorbed",
+            amount=gap,
+            detail=(
+                f"Yagnum's weekend gap: {_fmt(trade.qty)} x ({_fmt(_money(p_close))} - {_fmt(_money(trade.p_open))})"
+                f" = {_fmt(gap)}; the trader's {_fmt(_money(trade.p_open))} held"
+            ),
+        )
+
+    if -gap > trade.reserve:
+        trade.state = "breached"
+        if "breached" not in done:
+            _event(
+                session,
+                trade,
+                "breached",
+                amount=_money(-gap),
+                detail=(
+                    f"the gap cost Yagnum {_fmt(_money(-gap))}, more than the {_fmt(_money(trade.reserve))} "
+                    "reserve was sized for (ADR-028: Yagnum's loss, never the trader's)"
+                ),
+            )
+    else:
+        trade.state = "settled"
+
+    trade.settled_at = dt.datetime.now(dt.timezone.utc)
+    session.commit()
+    if "hedge_shadow_close" not in _event_kinds(session, trade):
         _shadow_hedge(session, trade, "close")
     return trade
 

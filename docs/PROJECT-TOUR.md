@@ -149,10 +149,12 @@ your account into the firm account; your notional is journaled *to* you —
 **you sold now, you are paid now**; that immediacy is the product.
 Settling: your real shares sell at the broker; the fill is `p_close`, the
 first regulated price; the proceeds repay the advance; and the escrow
-returns as `reserve + qty × (p_close − p_open)` — so you always end at the
-regulated price (ADR-017) and Yagnum always ends flat. If the gap eats
-more than the whole reserve, the trade is `breached` and the excess is
-debited: escrow is collateral, not a cap.
+returned — **in full, since ADR-028** (until Sep 7 it returned adjusted
+by `qty × (p_close − p_open)` so you ended at the regulated price and
+Yagnum stayed flat; now your weekend price is final and that gap is
+Yagnum's, recorded as `yagnum_pnl`). `breached` now means the gap cost
+Yagnum more than the reserve was sized for: a mark on Yagnum's book, never
+a debit to you.
 
 Three technical choices worth understanding:
 
@@ -340,7 +342,26 @@ and Backed's terms about US persons.
 
 ---
 
-## 9. What is not built yet
+## 9. ★ Sep 7: on the internet, and the paper's design turned on (ADR-027, ADR-028)
+
+**Azure.** Both apps run on Azure App Service's free tier:
+`yagnum-web.azurewebsites.net` and `yagnum-api.azurewebsites.net`. Neon
+stays the database, GitHub keeps the crons. One script created and
+configured everything from `.env`; a push to `main` redeploys. $0 a month,
+with a $1 budget alert as proof. [AZURE-DEPLOY.md](AZURE-DEPLOY.md).
+
+**Version B, for real.** The owner's call: the weekend price is the
+trader's final price. The escrow is still posted and comes back in full;
+the gap between Saturday's price and Monday's fill is Yagnum's, recorded
+on every trade, and `breached` now means "the gap exceeded what the
+reserve was sized for" on Yagnum's side. The on-chain hedge that is meant
+to cover that gap stays in shadow until the wallet question is settled.
+The landing page now says what the product does. ADR-028 states the
+adverse-selection risk this accepts.
+
+---
+
+## 10. What is not built yet
 
 - **Version B, step two** — a funded wallet and real sends, behind a
   flag, after the capital and US-persons questions (ADR-025).
@@ -360,7 +381,7 @@ and Backed's terms about US persons.
 
 ---
 
-## 10. The reading map
+## 11. The reading map
 
 | Doc | What it teaches |
 | --- | --- |
@@ -372,20 +393,20 @@ and Backed's terms about US persons.
 | [JUPITER-FLOW.md](JUPITER-FLOW.md) | The token side: mints, decimals, quotes vs prices, the on-chain record |
 | [WEEKEND-SIMULATOR.md](WEEKEND-SIMULATOR.md) | ★ The engine's lifecycle with real numbers, and how to drive the simulator |
 | [AZURE-DEPLOY.md](AZURE-DEPLOY.md) | How the site gets onto the internet, what the free tier can and cannot do |
-| [DECISIONS.md](DECISIONS.md) | Every choice, numbered, with reasons — ADR-001 through ADR-027 |
+| [DECISIONS.md](DECISIONS.md) | Every choice, numbered, with reasons — ADR-001 through ADR-028 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The structural reference: routes, tables, phases |
 | `docs/postman/` | Every API call, sendable by hand |
 
 ---
 
-## 11. Say it back
+## 12. Say it back
 
 1. What is the only thing the weekend simulator fakes? *(The calendar.)*
 2. A customer weekend-sells and the price falls 1% by Monday. Walk the
-   cash: who pays what, when? *(They are advanced Saturday's price
-   immediately; Monday the real sale fills 1% lower; the 1% comes out of
-   their reserve at release. They end at Monday's price — same as ADR-017
-   promises — but they had the cash two days early.)*
+   cash: who pays what, when? *(They are paid Saturday's price
+   immediately and that is their price. Monday the real sale fills 1%
+   lower; their whole reserve comes back; the 1% is Yagnum's loss on its
+   book — ADR-028 — which the on-chain hedge is meant to offset.)*
 3. Why is Invariant 1 "a query, not a promise"? *(Escrow moves are real
    tagged journals at the broker; summing them proves coverage without
    trusting our own bookkeeping.)*

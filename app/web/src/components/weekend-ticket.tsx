@@ -242,11 +242,11 @@ function PreviewBlock({
         />
       </dl>
       <p className="mt-3 text-[12px] leading-relaxed text-ink-faint">
-        The reserve is your money, held aside: {preview.symbol}&rsquo;s measured
-        weekend swing ({preview.sigma}) × a safety multiplier ({preview.z}) ×
-        the trade&rsquo;s value. When the market reopens, your trade settles at
-        the first real {preview.symbol} price and the reserve comes back
-        adjusted to it — bigger if the price moved your way, smaller if not.
+        This price is yours and final. The reserve is your money, held aside
+        until the market reopens and then returned in full: {preview.symbol}&rsquo;s
+        measured weekend swing ({preview.sigma}) × a safety multiplier
+        ({preview.z}) × the trade&rsquo;s value. The difference between this
+        price and Monday&rsquo;s real one is Yagnum&rsquo;s to carry, not yours.
       </p>
     </div>
   );
@@ -358,12 +358,11 @@ function TradePlaced({
         at {formatUsd(trade.p_open)}
       </p>
       <p className="mt-3 text-[14px] leading-relaxed text-ink-soft">
-        Your price is locked provisionally and{" "}
+        Your price is final and{" "}
         {trade.side === "sell" ? "the cash is in your account" : "the shares are paid for"}
-        . A reserve of {formatUsd(trade.reserve)} is held aside. When the
-        market reopens, the trade settles at the first real price and the
-        reserve comes back adjusted to it — follow it in the weekend trades
-        list on this page.
+        . A reserve of {formatUsd(trade.reserve)} is held aside and comes
+        back in full when the market reopens and the real shares settle —
+        follow it in the weekend trades list on this page.
       </p>
       <div className="mt-6 grid gap-2">
         <Link href="/orders" className={`${buttonStyles("primary")} w-full`}>
