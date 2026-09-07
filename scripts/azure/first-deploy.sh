@@ -10,7 +10,7 @@
 set -euo pipefail
 
 RG="${RG:-yagnum-rg}"
-LOC="${LOC:-eastus2}"
+LOC="${LOC:-westus2}"
 PLAN="${PLAN:-yagnum-free}"
 API="${API:-yagnum-api}"
 WEB="${WEB:-yagnum-web}"
@@ -24,7 +24,7 @@ if [ "${1:-}" != "deploy" ]; then
   az group create -n "$RG" -l "$LOC" -o none
   az appservice plan create -g "$RG" -n "$PLAN" --is-linux --sku F1 -o none
   az webapp create -g "$RG" -p "$PLAN" -n "$API" --runtime "PYTHON:3.13" -o none
-  az webapp create -g "$RG" -p "$PLAN" -n "$WEB" --runtime "NODE:22-lts" -o none
+  az webapp create -g "$RG" -p "$PLAN" -n "$WEB" --runtime "NODE:24-lts" -o none
 
   echo "== api settings"
   az webapp config set -g "$RG" -n "$API" -o none \

@@ -837,7 +837,7 @@ Neon or move to Azure Postgres).
 
 **Decision**: **Two web apps on one Linux App Service plan, tier F1
 (free)**: `yagnum-api` (Python 3.13, source zip, requirements installed
-on the server) and `yagnum-web` (Node 22, prebuilt Next.js standalone
+on the server) and `yagnum-web` (Node 24, prebuilt Next.js standalone
 zip). **Neon stays the database** — it is already the one the GitHub
 crons and the simulated traders write to, and one database beats two.
 **Clerk stays on the development instance**: production instances need a

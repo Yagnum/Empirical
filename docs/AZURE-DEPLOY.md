@@ -31,9 +31,9 @@ while they start. That is not a bug, and it is the price of $0.
 | Azure word | What it is here |
 | --- | --- |
 | Subscription | The billing account. "Azure subscription 1". |
-| Resource group | A folder for related things. `yagnum-rg`, in East US 2. |
+| Resource group | A folder for related things. `yagnum-rg`, in West US 2. East US 2 refused with zero App Service quota on this new subscription. |
 | App Service plan | The rented computer. `yagnum-free`, Linux, tier F1. One plan can hold several apps. |
-| Web app | One running app on that plan. `yagnum-api` (Python 3.13) and `yagnum-web` (Node 22). |
+| Web app | One running app on that plan. `yagnum-api` (Python 3.13) and `yagnum-web` (Node 24). |
 | App settings | Environment variables for one web app. Where every secret lives. |
 | Startup command | What to run when the app starts. |
 | Zip deploy | Upload a zip; App Service unpacks it and, for the API, installs requirements. |
