@@ -9,8 +9,8 @@ import { formatUsd } from "@/lib/money";
 
   The figures are the engine's own from a settlement run on 2026-09-04
   (trade 7: 2 NVDA sold at Jupiter's bid, reserve 10.2%, a +1% Monday) and
-  the panel says they are an illustration. Two numbers are meant to be
-  read first: the Saturday price, and the move that came back in green.
+  the panel says they are an illustration. One number is the headline,
+  the Saturday price; the move that came back is green, not large.
 */
 type Row = {
   term: string;
@@ -46,7 +46,7 @@ export function SpecimenWeekendTrade() {
                 row.tone === "hero"
                   ? "figure-nums shrink-0 font-display text-[1.375rem] font-bold text-ink"
                   : row.tone === "gain"
-                    ? "figure-nums shrink-0 font-display text-[1.375rem] font-bold text-gain"
+                    ? "figure-nums shrink-0 font-semibold text-gain"
                     : "figure-nums shrink-0 text-ink"
               }
             >
