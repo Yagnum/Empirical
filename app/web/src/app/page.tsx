@@ -12,27 +12,28 @@ import { Wordmark } from "@/components/wordmark";
   settlement layer that lets a brokerage customer use that price safely.
   Every number on this page is the engine's own (docs/PROJECT-TOUR.md); the
   paper-trading disclosure stays, as the footer a real broker would print.
+  Copy is kept short on purpose: one idea per block, plain words.
 */
 
 const STEPS = [
   {
     title: "Trade at the token's live price",
-    body: "On a Saturday, NVDA has no price — but NVDAx, the token backed one-to-one by the share, trades on Jupiter around the clock. Yagnum quotes the executable price for your exact size and executes at it provisionally: sells are paid now, buys are yours now.",
+    body: "On a Saturday NVDA has no price, but NVDAx, the token backed by the share, trades on Jupiter around the clock. You get the price your exact order would fetch, right now. Sells are paid immediately.",
   },
   {
     title: "A measured reserve is held",
-    body: "Part of the trade's value is set aside until the market reopens. It is sized per stock from two years of Friday-to-Monday gaps, times a multiplier measured across every recorded token-weekend — typically three to ten percent. It is your money, and it comes back adjusted by the weekend's move.",
+    body: "Part of the trade's value is set aside until Monday. It is sized per stock from two years of weekend gaps, times a multiplier measured across every recorded token-weekend. Typically three to ten percent.",
   },
   {
     title: "Monday, the real shares settle",
-    body: "At the first regulated print the real shares move in your brokerage account, and the trade settles at that price: the reserve comes back bigger if the market moved your way, smaller if not. You end at Monday's price, Yagnum ends flat, and every journal and order is on your statement.",
+    body: "At the first real price the shares move in your brokerage account and your trade is trued up to it. The reserve comes back bigger if the market moved your way, smaller if not. Yagnum ends flat.",
   },
 ];
 
 const FACTS = [
   { figure: "48 h", label: "every weekend with no regulated venue" },
   { figure: "20", label: "U.S. stocks and ETFs with a live token" },
-  { figure: "5 min", label: "price and spread record, token beside share, since Aug 28" },
+  { figure: "5 min", label: "price record, token beside share, since Aug 28" },
   { figure: "3.77", label: "reserve multiplier, measured from 400+ token-weekends" },
 ];
 
@@ -74,11 +75,9 @@ export default async function LandingPage() {
             </h1>
             <p className="mt-6 max-w-xl text-[17px] leading-relaxed text-ink-soft">
               The stock market sleeps every weekend. Tokenized shares on Solana
-              do not. Yagnum lets you buy or sell real U.S. stocks on a Saturday
-              at that live price, holds a measured reserve until Monday, and
-              settles the real shares at the first regulated price the moment
-              the market reopens — a settlement layer between decentralised
-              markets and a regulated brokerage account.
+              do not. Yagnum lets you trade real U.S. stocks on a Saturday at
+              that live price, with a measured reserve bridging to Monday&rsquo;s
+              real settlement.
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-3">
               <Link href="/sign-up" className={buttonStyles("primary")}>
@@ -99,9 +98,8 @@ export default async function LandingPage() {
               How a weekend trade works
             </h2>
             <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-ink-soft">
-              Execution and settlement are separated in time. Jupiter gives the
-              trade a price now; the brokerage gives it real settlement when the
-              market reopens; the reserve bridges the two.
+              Jupiter gives the trade a price now. The brokerage settles it for
+              real on Monday. The reserve bridges the two.
             </p>
             <ol className="mt-10 grid gap-10 md:grid-cols-3">
               {STEPS.map((step, index) => (
@@ -129,8 +127,8 @@ export default async function LandingPage() {
             </h2>
             <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-ink-soft">
               A recorder watches every token beside its real share, day and
-              night, and the reserve is refreshed from that record after each
-              weekend. The numbers below are the engine&rsquo;s own.
+              night. The reserve is refreshed from that record after each
+              weekend.
             </p>
             <dl className="mt-10 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
               {FACTS.map((fact) => (
@@ -145,30 +143,17 @@ export default async function LandingPage() {
               ))}
             </dl>
 
-            <div className="mt-14 grid gap-8 md:grid-cols-2">
-              <div>
-                <h3 className="font-display text-[17px] font-semibold text-ink">
-                  What Yagnum is
-                </h3>
-                <p className="mt-2 text-[15px] leading-relaxed text-ink-soft">
-                  A settlement layer. It reads live prices on Jupiter, a
-                  Solana exchange, and settles real shares through a regulated
-                  brokerage. It brings the two together for the hours the
-                  market does not serve, and keeps a ledger a statement can be
-                  printed from.
-                </p>
-              </div>
-              <div>
-                <h3 className="font-display text-[17px] font-semibold text-ink">
-                  What it is not
-                </h3>
-                <p className="mt-2 text-[15px] leading-relaxed text-ink-soft">
-                  Not a token issuer, not a market maker, not a trading
-                  strategy. You never hold a token; you hold shares in a
-                  brokerage account, and on weekdays Yagnum is an ordinary
-                  brokerage: real market prices, orders, positions, statements.
-                </p>
-              </div>
+            <div className="mt-14 max-w-2xl">
+              <p className="text-[15px] leading-relaxed text-ink-soft">
+                <span className="font-semibold text-ink">Yagnum is a settlement layer</span>{" "}
+                between a Solana exchange and a regulated brokerage account.
+              </p>
+              <p className="mt-3 text-[15px] leading-relaxed text-ink-soft">
+                <span className="font-semibold text-ink">It is not</span> a token
+                issuer or a market maker, and you never hold a token. On
+                weekdays it is an ordinary brokerage: real prices, orders,
+                positions, statements.
+              </p>
             </div>
           </div>
         </section>
@@ -182,8 +167,7 @@ export default async function LandingPage() {
             Yagnum is a student project built from an academic proposal on
             settlement for tokenized equities, running on Alpaca&rsquo;s Broker
             API sandbox. Every account is simulated: the cash is not real, the
-            trades are not real, no money can be deposited or withdrawn, and
-            the on-chain hedge is modelled on Solana mainnet without being sent.
+            trades are not real, and no money can be deposited or withdrawn.
           </p>
         </div>
       </footer>

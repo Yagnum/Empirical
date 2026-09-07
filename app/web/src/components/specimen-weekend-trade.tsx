@@ -9,16 +9,22 @@ import { formatUsd } from "@/lib/money";
 
   The figures are the engine's own from a settlement run on 2026-09-04
   (trade 7: 2 NVDA sold at Jupiter's bid, reserve 10.2%, a +1% Monday) and
-  the panel says they are an illustration. Colour follows the statement's
-  convention: green came back to you, red would have come out of the
-  reserve.
+  the panel says they are an illustration. Two numbers are meant to be
+  read first: the Saturday price, and the move that came back in green.
 */
-const ROWS: { term: string; value: string; strong?: boolean; note?: string }[] = [
-  { term: "Saturday, sold 2 NVDA at the token\u2019s live bid", value: "230.80", strong: true },
+type Row = {
+  term: string;
+  value: string;
+  tone?: "hero" | "gain";
+};
+
+const ROWS: Row[] = [
+  { term: "Saturday: sold 2 NVDA at the token’s live price", value: "230.80", tone: "hero" },
   { term: "Cash to you that moment", value: "414.73" },
   { term: "Reserve held until Monday (10.2%)", value: "46.87" },
-  { term: "Monday, the real shares sold at", value: "233.11" },
-  { term: "Reserve returned to you", value: "51.49", note: "+4.62" },
+  { term: "Monday: the real shares sold at", value: "233.11" },
+  { term: "The market rose by Monday", value: "+4.62", tone: "gain" },
+  { term: "Reserve returned to you", value: "51.49" },
 ];
 
 export function SpecimenWeekendTrade() {
@@ -32,38 +38,31 @@ export function SpecimenWeekendTrade() {
             key={row.term}
             className="flex items-baseline justify-between gap-6 py-3.5 text-[14px]"
           >
-            <dt className={row.strong ? "font-medium text-ink" : "text-ink-soft"}>
+            <dt className={row.tone ? "font-medium text-ink" : "text-ink-soft"}>
               {row.term}
             </dt>
             <dd
-              className={`figure-nums shrink-0 ${row.strong ? "font-display text-[1.25rem] font-bold text-ink" : "text-ink"}`}
+              className={
+                row.tone === "hero"
+                  ? "figure-nums shrink-0 font-display text-[1.375rem] font-bold text-ink"
+                  : row.tone === "gain"
+                    ? "figure-nums shrink-0 font-display text-[1.375rem] font-bold text-gain"
+                    : "figure-nums shrink-0 text-ink"
+              }
             >
-              {row.note ? (
-                <span className="mr-2 text-[12px] font-medium text-gain">
-                  {formatUsd("46.87")} {row.note.startsWith("+") ? "+" : "\u2212"}{" "}
-                  {formatUsd(row.note.slice(1))}
-                </span>
-              ) : null}
-              {formatUsd(row.value)}
+              {row.tone === "gain" ? `+${formatUsd(row.value.slice(1))}` : formatUsd(row.value)}
             </dd>
           </div>
         ))}
       </dl>
 
-      <div className="border-t border-rule-soft bg-accent-wash px-6 py-4">
-        <p className="text-[13px] leading-relaxed text-ink">
-          <span className="font-semibold">
-            Your final price: {formatUsd("233.11")}, Monday&rsquo;s real one.
-          </span>{" "}
-          You had the cash on Saturday, and the{" "}
-          <span className="figure-nums font-medium text-gain">+{formatUsd("4.62")}</span>{" "}
-          the market rose came back to you inside the reserve. Had it fallen,
-          that much would have come out of it.
-        </p>
-      </div>
+      <p className="border-t border-rule-soft bg-accent-wash px-6 py-4 text-[13px] leading-relaxed text-ink">
+        <span className="font-semibold">Your final price: {formatUsd("233.11")}, Monday&rsquo;s real one.</span>{" "}
+        The rise came back inside the reserve; a fall would have come out of it.
+      </p>
 
-      <p className="border-t border-rule-soft px-6 py-4 text-[12px] text-ink-faint">
-        Illustration from a sandbox settlement. Figures do not describe a real account.
+      <p className="border-t border-rule-soft px-6 py-3 text-[12px] text-ink-faint">
+        Illustration from a sandbox settlement, not a real account.
       </p>
     </Panel>
   );
