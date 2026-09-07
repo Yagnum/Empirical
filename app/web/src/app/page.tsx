@@ -68,7 +68,7 @@ export default async function LandingPage() {
         <section className="mx-auto grid max-w-6xl items-center gap-14 px-6 py-16 lg:grid-cols-[1.05fr_0.95fr] lg:gap-20 lg:py-24">
           <div>
             <p className="font-display text-[15px] font-medium text-accent">
-              Weekend trading · U.S. equities · paper money
+              24/7 trading, weekends included · U.S. equities · paper money
             </p>
             <h1 className="mt-4 font-display text-[clamp(2.5rem,5.5vw,3.75rem)] leading-[1.05] font-bold tracking-[-0.035em] text-balance text-ink">
               Trade the market while it is closed.
