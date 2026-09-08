@@ -68,6 +68,16 @@ export function FundingForm() {
 
   return (
     <form ref={formRef} action={action} className="px-6 py-7">
+      {/*
+        A disabled control is left out of the submission — that is the HTML
+        spec, not a quirk — and the fieldset below is disabled while the
+        account activates. So the retry above would post a form with no
+        amount at all, and the server would answer "Enter an amount to
+        deposit" over a field that plainly holds one. The amount rides on
+        this hidden twin instead, which exists only while the real input is
+        disabled, so `amount` is never submitted twice.
+      */}
+      {activating ? <input type="hidden" name="amount" value={amount} /> : null}
       <fieldset className="border-0 p-0" disabled={pending || activating}>
         <legend className="font-display text-[14px] font-semibold text-ink">
           Starting balance
