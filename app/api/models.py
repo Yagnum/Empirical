@@ -286,6 +286,28 @@ class WeekendTrade(Base):
     z: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
     reserve: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     fees: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    # Where sigma came from ("measured" or "pooled_fallback") and which
+    # research_params.json produced the three numbers above.
+    sigma_source: Mapped[str | None] = mapped_column(String(16))
+    params_generated_at: Mapped[str | None] = mapped_column(String(40))
+    # The price context at open, captured once so the gap decomposition
+    # (basis + share move + spread) never has to rebuild it from the nearest
+    # sampler row. Best effort: any of these may be null, and a failure to
+    # capture them never blocks the trade.
+    #   open_bid / open_ask   Jupiter quotes for THIS trade's size, one per
+    #                         direction (one of them is p_open itself)
+    #   open_mid              (bid + ask) / 2
+    #   share_ref_*           the real share's reference price, where it came
+    #                         from ("alpaca_latest_trade") and when it printed
+    #   open_basis            open_mid / share_ref_price - 1: the token's
+    #                         premium (+) or discount (-) to the share
+    open_bid: Mapped[Decimal | None] = mapped_column(MONEY)
+    open_ask: Mapped[Decimal | None] = mapped_column(MONEY)
+    open_mid: Mapped[Decimal | None] = mapped_column(MONEY)
+    share_ref_price: Mapped[Decimal | None] = mapped_column(MONEY)
+    share_ref_source: Mapped[str | None] = mapped_column(String(24))
+    share_ref_at: Mapped[dt.datetime | None] = mapped_column(TZ)
+    open_basis: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
     state: Mapped[str] = mapped_column(String(24), nullable=False, default="provisional")
     simulated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Who placed it: "user" (a person through the app) or "sim" (a Groq
