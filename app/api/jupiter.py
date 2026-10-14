@@ -189,13 +189,18 @@ def swap_quote(input_mint: str, output_mint: str, amount_base_units: int) -> dic
     )
 
 
-def executable_price(token: dict, side: str, qty: Decimal) -> dict:
+def executable_price(
+    token: dict, side: str, qty: Decimal, *, size_price: Decimal | None = None
+) -> dict:
     """The effective USD price for trading `qty` of this xStock now.
 
     side "sell": quote qty tokens -> USDC. The USDC out per token is the bid.
     side "buy":  quote USDC -> tokens for roughly the right notional (sized
     from the last-swap price) and read USDC in per token out - the ask. The
     buy leg prices the trade; it does not promise that exact token amount.
+    `size_price`, when given, sizes the buy leg instead of the last-swap
+    price, which saves the price/v3 call (the open's second quote uses the
+    first quote's price - see weekend._capture_open_context).
 
     Returns {"price", "usd_amount", "token_amount", "price_impact_pct"};
     price = usd_amount / token_amount, all Decimal.
@@ -208,8 +213,11 @@ def executable_price(token: dict, side: str, qty: Decimal) -> dict:
         usd = from_base_units(str(body["outAmount"]), USDC_DECIMALS)
         tokens = qty
     else:
-        last = prices([mint]).get(mint) or {}
-        approx = Decimal(str(last.get("usdPrice") or "0"))
+        if size_price is not None:
+            approx = size_price
+        else:
+            last = prices([mint]).get(mint) or {}
+            approx = Decimal(str(last.get("usdPrice") or "0"))
         if approx <= 0:
             raise JupiterError("no last-swap price to size the buy quote from")
         notional = (qty * approx).quantize(Decimal("0.000001"))

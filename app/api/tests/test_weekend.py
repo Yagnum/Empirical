@@ -27,6 +27,10 @@ from config import settings
 
 ET = ZoneInfo("America/New_York")
 
+# Kept before the autouse fixture below replaces it, for the one test that
+# exercises the real calendar parsing.
+_REAL_TRADING_DAYS = sessions._trading_days
+
 
 @pytest.fixture(autouse=True)
 def clean_override():
@@ -114,6 +118,90 @@ def test_unknown_calendar_falls_back_to_weekday_arithmetic():
     assert sessions.scheduled_session(_labor(7, 13, 0)) == sessions.REGULAR
 
 
+# Thanksgiving to New Year, 2026, as Alpaca's calendar returns it: trading
+# day -> regular close. Thu 11-26 and Fri 12-25 are holidays (absent); Fri
+# 11-27 and Thu 12-24 close at 1 PM.
+_FULL, _HALF = dt.time(16, 0), dt.time(13, 0)
+_HOLIDAY_SEASON = {
+    dt.date(2026, 11, 23): _FULL,
+    dt.date(2026, 11, 24): _FULL,
+    dt.date(2026, 11, 25): _FULL,
+    dt.date(2026, 11, 27): _HALF,
+    dt.date(2026, 11, 30): _FULL,
+    dt.date(2026, 12, 21): _FULL,
+    dt.date(2026, 12, 22): _FULL,
+    dt.date(2026, 12, 23): _FULL,
+    dt.date(2026, 12, 24): _HALF,
+    dt.date(2026, 12, 28): _FULL,
+}
+
+
+def _season(month: int, day: int, hour: int, minute: int = 0) -> dt.datetime:
+    return dt.datetime(2026, month, day, hour, minute, tzinfo=ET)
+
+
+@pytest.mark.parametrize(
+    ("moment", "expected"),
+    [
+        # Friday 2026-11-27, the day after Thanksgiving: a 1 PM close.
+        (_season(11, 27, 9, 0), sessions.PREMARKET),
+        (_season(11, 27, 12, 59), sessions.REGULAR),
+        (_season(11, 27, 13, 0), sessions.AFTERHOURS),  # the close itself
+        (_season(11, 27, 13, 1), sessions.AFTERHOURS),
+        (_season(11, 27, 16, 0), sessions.AFTERHOURS),  # a normal close time
+        (_season(11, 27, 16, 59), sessions.AFTERHOURS),
+        (_season(11, 27, 17, 0), sessions.WEEKEND),  # after-hours ends at 5
+        (_season(11, 27, 20, 0), sessions.WEEKEND),
+        # Thursday 2026-12-24, Christmas Eve: a 1 PM close, a holiday next.
+        (_season(12, 24, 12, 59), sessions.REGULAR),
+        (_season(12, 24, 13, 1), sessions.AFTERHOURS),
+        (_season(12, 24, 16, 0), sessions.AFTERHOURS),
+        (_season(12, 24, 17, 0), sessions.WEEKEND),  # overnight would trade
+        (_season(12, 24, 20, 0), sessions.WEEKEND),  # INTO Christmas Day
+        (_season(12, 25, 12, 0), sessions.WEEKEND),  # Christmas itself
+        # The full days either side are untouched.
+        (_season(11, 25, 15, 59), sessions.REGULAR),
+        (_season(11, 25, 19, 59), sessions.AFTERHOURS),
+        (_season(12, 23, 16, 30), sessions.AFTERHOURS),
+        (_season(12, 23, 20, 0), sessions.OVERNIGHT),  # into the half day
+    ],
+)
+def test_early_close_days_end_the_afternoon_early(moment, expected):
+    assert sessions.scheduled_session(moment, trading_days=_HOLIDAY_SEASON) == expected
+
+
+def test_half_day_monday_to_thursday_evening_is_overnight():
+    # A half day whose next day trades (a made-up Tuesday 1 PM close): from
+    # 5 PM it is the evening that normally starts at 8 PM - overnight.
+    days = {dt.date(2026, 12, 22): _HALF, dt.date(2026, 12, 23): _FULL}
+    assert sessions.scheduled_session(_season(12, 22, 17, 30), trading_days=days) == sessions.OVERNIGHT
+
+
+def test_calendar_rows_carry_the_close(monkeypatch):
+    # The real fetch path: Alpaca's rows -> {date: close}.
+    # The real _trading_days, under the autouse no-network mock, with the
+    # network call itself faked.
+    monkeypatch.setattr(sessions, "_trading_days", _REAL_TRADING_DAYS)
+    monkeypatch.setattr(sessions, "_calendar_cache", None)
+    monkeypatch.setattr(
+        alpaca,
+        "get_calendar",
+        lambda start, end: [
+            {"date": "2026-11-25", "open": "09:30", "close": "16:00"},
+            {"date": "2026-11-27", "open": "09:30", "close": "13:00"},
+        ],
+    )
+    days = sessions._trading_days()
+    assert days == {dt.date(2026, 11, 25): _FULL, dt.date(2026, 11, 27): _HALF}
+    assert sessions.scheduled_session(_season(11, 27, 13, 1)) == sessions.AFTERHOURS
+
+
+def test_a_plain_set_of_days_still_means_full_days():
+    # Callers that pass only WHICH days trade keep the 4 PM / 8 PM afternoon.
+    days = frozenset({dt.date(2026, 11, 27)})
+    assert sessions.scheduled_session(_season(11, 27, 13, 1), trading_days=days) == sessions.REGULAR
+
+
 def test_override_flips_only_in_development(monkeypatch):
     sessions.set_weekend_override(True)
     state = sessions.effective_session(_at(0, 13, 0))  # Monday 1 PM
@@ -198,6 +286,14 @@ class Broker:
         self.positions = [{"symbol": "NVDA", "qty": "5", "qty_available": "5"}]
         self.cash = "100000"
         self.last_trade_price = "200"
+        self.last_trade_at = "2026-09-04T23:59:58.123456789Z"
+        # The open's two Jupiter quotes: the bid prices a sell, the ask a
+        # buy. Equal by default so the hand-checked cash figures stay at
+        # 200; the trade-time capture tests split them.
+        self.bid = Decimal("200")
+        self.ask = Decimal("200")
+        self.quote_error: Exception | None = None
+        self.quotes: list[dict] = []
 
     def install(self, monkeypatch):
         # Pin the reserve parameters: the real research_params.json refreshes
@@ -220,7 +316,8 @@ class Broker:
         monkeypatch.setattr(
             alpaca, "get_trading_account", lambda account_id: {"cash": self.cash}
         )
-        monkeypatch.setattr(alpaca, "latest_trade", lambda symbol: {"p": self.last_trade_price})
+        monkeypatch.setattr(alpaca, "latest_trade", self._latest_trade)
+        monkeypatch.setattr(jupiter, "SPREAD_LEG_DELAY_SECONDS", 0)
         monkeypatch.setattr(alpaca, "create_journal", self._create_journal)
         monkeypatch.setattr(alpaca, "create_order", self._create_order)
         monkeypatch.setattr(alpaca, "get_order", self._get_order)
@@ -251,10 +348,20 @@ class Broker:
             "filled_avg_price": self.filled_avg_price if self.order_status == "filled" else None,
         }
 
-    def _executable_price(self, token, side, qty):
+    def _latest_trade(self, symbol):
+        if isinstance(self.last_trade_price, Exception):
+            raise self.last_trade_price
+        return {"p": self.last_trade_price, "t": self.last_trade_at}
+
+    def _executable_price(self, token, side, qty, *, size_price=None):
+        self.quotes.append({"side": side, "qty": qty, "size_price": size_price})
+        # `size_price` marks the open's second quote (the other direction).
+        if size_price is not None and self.quote_error is not None:
+            raise self.quote_error
+        price = self.bid if side == "sell" else self.ask
         return {
-            "price": Decimal("200"),
-            "usd_amount": Decimal("200") * qty,
+            "price": price,
+            "usd_amount": price * qty,
             "token_amount": qty,
             "price_impact_pct": "0.01",
         }
@@ -339,6 +446,98 @@ def test_open_buy_needs_the_cash(db_client, broker):
     )
     assert response.status_code == 400
     assert "insufficient_cash" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Trade-time capture: the price context at open
+# ---------------------------------------------------------------------------
+
+
+def _trade_row(trade_id: int):
+    from models import WeekendTrade
+
+    with db.session_scope() as session:
+        row = session.get(WeekendTrade, trade_id)
+        session.expunge(row)
+        return row
+
+
+def test_open_sell_captures_bid_ask_mid_share_and_basis(db_client, broker):
+    broker.bid, broker.ask = Decimal("199"), Decimal("201")
+    broker.last_trade_price = "196.50"
+    trade = _open_sell(db_client)
+    row = _trade_row(trade["id"])
+
+    # The sell priced at the bid; ONE more quote, the buy, same size, sized
+    # from the first quote's price (no price/v3 call).
+    assert row.p_open == Decimal("199")
+    assert broker.quotes == [
+        {"side": "sell", "qty": Decimal("2"), "size_price": None},
+        {"side": "buy", "qty": Decimal("2"), "size_price": Decimal("199")},
+    ]
+    assert row.open_bid == Decimal("199")
+    assert row.open_ask == Decimal("201")
+    assert row.open_mid == Decimal("200")
+    assert row.share_ref_price == Decimal("196.50")
+    assert row.share_ref_source == "alpaca_latest_trade"
+    assert row.share_ref_at == dt.datetime(2026, 9, 4, 23, 59, 58, 123456, tzinfo=dt.timezone.utc)
+    # 200 / 196.50 - 1, stored to Numeric(20, 10).
+    assert row.open_basis == (Decimal("200") / Decimal("196.50") - 1).quantize(Decimal("1e-10"))
+    # The reserve inputs, with where sigma came from and which params file.
+    assert row.sigma == Decimal("0.0270")
+    assert row.sigma_source == "measured"
+    assert row.params_generated_at == "pinned-for-tests"
+    # Money and prices come back as Decimal, never float.
+    assert all(
+        isinstance(value, Decimal)
+        for value in (row.open_bid, row.open_ask, row.open_mid, row.share_ref_price, row.open_basis)
+    )
+
+
+def test_open_buy_captures_the_mirror(db_client, broker):
+    broker.bid, broker.ask = Decimal("199"), Decimal("201")
+    sessions.set_weekend_override(True)
+    response = db_client.post("/weekend/orders", json={"symbol": "NVDA", "side": "buy", "qty": "2"})
+    assert response.status_code == 200, response.text
+    row = _trade_row(response.json()["id"])
+
+    assert row.p_open == Decimal("201")  # a buy pays the ask
+    assert broker.quotes[1]["side"] == "sell"
+    assert row.open_bid == Decimal("199")
+    assert row.open_ask == Decimal("201")
+    assert row.open_mid == Decimal("200")
+
+
+def test_failed_capture_never_blocks_the_trade(db_client, broker):
+    broker.quote_error = jupiter.JupiterError("429 too many requests")
+    broker.last_trade_price = alpaca.AlpacaError("data api down", status_code=503)
+    trade = _open_sell(db_client)
+
+    # The money flow is untouched: same escrow, same advance.
+    assert trade["state"] == "provisional"
+    assert trade["reserve"] == "40.78"
+    assert [j["amount"] for j in broker.journals] == ["40.78", "400.00"]
+
+    row = _trade_row(trade["id"])
+    assert row.open_bid == Decimal("200")  # the sell's own quote is still known
+    assert row.open_ask is None
+    assert row.open_mid is None
+    assert row.share_ref_price is None
+    assert row.share_ref_source is None
+    assert row.open_basis is None
+
+    # The failure is on the trade's own trail, not swallowed.
+    kinds = [event["kind"] for event in db_client.get(f"/weekend/orders/{trade['id']}").json()["events"]]
+    assert "context_partial" in kinds
+
+
+def test_capture_survives_a_missing_share_price(db_client, broker):
+    broker.last_trade_price = "0"
+    trade = _open_sell(db_client)
+    row = _trade_row(trade["id"])
+    assert row.open_mid == Decimal("200")
+    assert row.share_ref_price is None
+    assert row.open_basis is None
 
 
 def test_fractional_weekend_orders_are_refused(db_client, broker):

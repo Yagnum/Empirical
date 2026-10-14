@@ -48,6 +48,7 @@ that proves it. Money is Decimal; strings at the boundaries (ADR-010).
 from __future__ import annotations
 
 import datetime as dt
+import sys
 import time
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -59,6 +60,7 @@ import alpaca
 import err
 import hedge
 import jupiter
+import sampler
 import sessions
 from config import settings
 from models import WeekendTrade, WeekendTradeEvent
@@ -162,6 +164,78 @@ def price_trade(symbol: str, side: str, qty: Decimal) -> dict:
     p_open = quote["price"]
     sizing = err.compute(underlying, qty, p_open)
     return {"token": token, "quote": quote, "p_open": p_open, "sizing": sizing}
+
+
+# ---------------------------------------------------------------------------
+# The price context at open (the gap decomposition's inputs)
+# ---------------------------------------------------------------------------
+
+# Where `share_ref_price` comes from. The engine prices off Jupiter and never
+# reads a Friday close, so the reference is Alpaca's latest trade - on a
+# weekend that is the last after-hours print, stamped in `share_ref_at`.
+SHARE_REF_SOURCE = "alpaca_latest_trade"
+
+
+def _capture_open_context(
+    token: dict, symbol: str, side: str, qty: Decimal, p_open: Decimal
+) -> tuple[dict, list[str]]:
+    """Everything the gap decomposition needs about the moment of open.
+
+        open_bid / open_ask   p_open is one of them already (the bid for a
+                              sell, the ask for a buy); the other is ONE more
+                              Jupiter quote, same size, the other direction
+        open_mid              (bid + ask) / 2
+        share_ref_*           Alpaca's latest trade of the real share
+        open_basis            open_mid / share_ref_price - 1
+
+    Observational, like the shadow hedge: never raises. Each part fails on
+    its own, stores null, and adds a line to the returned problem list.
+    """
+    context: dict = {
+        "open_bid": None,
+        "open_ask": None,
+        "open_mid": None,
+        "share_ref_price": None,
+        "share_ref_source": None,
+        "share_ref_at": None,
+        "open_basis": None,
+    }
+    problems: list[str] = []
+
+    other_side = "buy" if side == "sell" else "sell"
+    other_price: Decimal | None = None
+    try:
+        # The same pause spread_quote takes between its legs: two quotes
+        # back to back is exactly the burst Jupiter's rate limit 429s.
+        if jupiter.SPREAD_LEG_DELAY_SECONDS:
+            time.sleep(jupiter.SPREAD_LEG_DELAY_SECONDS)
+        other_price = jupiter.executable_price(token, other_side, qty, size_price=p_open)["price"]
+    except Exception as exc:  # noqa: BLE001 - observational; must not block money
+        problems.append(f"{other_side} quote: {exc}")
+    if side == "sell":
+        context["open_bid"], context["open_ask"] = p_open, other_price
+    else:
+        context["open_bid"], context["open_ask"] = other_price, p_open
+    if context["open_bid"] is not None and context["open_ask"] is not None:
+        context["open_mid"] = (context["open_bid"] + context["open_ask"]) / 2
+
+    try:
+        last = alpaca.latest_trade(symbol)
+        price = sampler._decimal(last.get("p"))
+        if price is None or price <= 0:
+            raise ValueError("no last trade price")
+        context["share_ref_price"] = price
+        context["share_ref_source"] = SHARE_REF_SOURCE
+        context["share_ref_at"] = sampler._moment(last.get("t"))
+    except Exception as exc:  # noqa: BLE001 - observational; must not block money
+        problems.append(f"share reference: {exc}")
+
+    if context["open_mid"] is not None and context["share_ref_price"] is not None:
+        context["open_basis"] = context["open_mid"] / context["share_ref_price"] - 1
+
+    for problem in problems:
+        print(f"[weekend] open context for {symbol}: {problem}", file=sys.stderr)
+    return context, problems
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +348,10 @@ def open_trade(
     else:
         _check_buy_cash(account_id, notional + sizing["reserve"])
 
+    # Captured as close to the p_open quote as possible, before any money
+    # moves. Never raises; a gap here is a null column, not a failed trade.
+    context, context_problems = _capture_open_context(token, symbol.upper(), side, qty, p_open)
+
     trade = WeekendTrade(
         clerk_user_id=user_id,
         alpaca_account_id=account_id,
@@ -287,6 +365,9 @@ def open_trade(
         z=sizing["z"],
         reserve=sizing["reserve"],
         fees=sizing["fees"],
+        sigma_source=sizing["sigma_source"],
+        params_generated_at=sizing["params_generated_at"],
+        **context,
         state="provisional",
         simulated=sessions.weekend_override(),
         source=source,
@@ -303,6 +384,13 @@ def open_trade(
             f"{_fmt(p_open)} (Jupiter quote, impact {priced['quote']['price_impact_pct']}%)"
         ),
     )
+    if context_problems:
+        _event(
+            session,
+            trade,
+            "context_partial",
+            detail=("price context not fully captured: " + "; ".join(context_problems))[:500],
+        )
 
     tag = f"weekend trade {trade.id}"
     trade.escrow_journal_id = _journal(
