@@ -29,7 +29,8 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterable
-from decimal import Decimal
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import httpx
@@ -103,11 +104,81 @@ def list_xstocks() -> list[dict]:
             "mint": str(token["id"]),
             "name": str(token.get("name", "")),
             "decimals": int(token.get("decimals") or 0),
+            "issuer": "xstocks",
         }
         for token in tokens
         if is_xstock(token) and token.get("id")
     ]
     return sorted(found, key=lambda entry: entry["symbol"])
+
+
+# ---------------------------------------------------------------------------
+# Ondo Global Markets tokens (docs/RESEARCH-COLLECTION.md, series A)
+# ---------------------------------------------------------------------------
+#
+# Ondo's tokenized stocks mint and redeem 24/7 against Ondo itself; xStocks
+# do not. Sampling both side by side tests whether that primary-market
+# access keeps the weekend price closer to fair.
+#
+# A FIXED, VERIFIED LIST - deliberately not a live search. Jupiter's search
+# for "NVDAon" returns one real token and a dozen look-alikes, and an
+# unverified mint is worse than no data. Each address below was checked on
+# 2026-10-13 against three sources that agree:
+#   1. Ondo's own token sheet, linked from docs.ondo.finance/addresses
+#      ("Solana Deployed Address" column);
+#   2. Jupiter's token API (tags 'ondo' + 'verified', name "(Ondo Tokenized)");
+#   3. the mint account on Solana mainnet: Token-2022 program, 9 decimals,
+#      on-chain metadata symbol matching, mint authority
+#      9foMHsSDq7nMg4WPusSz9eY7tyxyukqborA8GyU5cUxD shared by all eight.
+# All are Token-2022 with the scaled-UI-amount extension (see ui_multiplier).
+ONDO_TOKENS: tuple[dict, ...] = (
+    {"symbol": "AAPLon", "underlying": "AAPL", "mint": "123mYEnRLM2LLYsJW3K6oyYh8uP1fngj732iG638ondo", "name": "Apple (Ondo Tokenized)"},
+    {"symbol": "CRCLon", "underlying": "CRCL", "mint": "6xHEyem9hmkGtVq6XGCiQUGpPsHBaoYuYdFNZa5ondo", "name": "Circle Internet Group (Ondo Tokenized)"},
+    {"symbol": "GOOGLon", "underlying": "GOOGL", "mint": "bbahNA5vT9WJeYft8tALrH1LXWffjwqVoUbqYa1ondo", "name": "Alphabet Class A (Ondo Tokenized)"},
+    {"symbol": "METAon", "underlying": "META", "mint": "fDxs5y12E7x7jBwCKBXGqt71uJmCWsAQ3Srkte6ondo", "name": "Meta Platforms (Ondo Tokenized)"},
+    {"symbol": "NVDAon", "underlying": "NVDA", "mint": "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo", "name": "NVIDIA (Ondo Tokenized)"},
+    {"symbol": "QQQon", "underlying": "QQQ", "mint": "HrYNm6jTQ71LoFphjVKBTdAE4uja7WsmLG8VxB8ondo", "name": "Invesco QQQ (Ondo Tokenized)"},
+    {"symbol": "SPYon", "underlying": "SPY", "mint": "k18WJUULWheRkSpSquYGdNNmtuE2Vbw1hpuUi92ondo", "name": "SPDR S&P 500 ETF (Ondo Tokenized)"},
+    {"symbol": "TSLAon", "underlying": "TSLA", "mint": "KeGv7bsfR4MheC1CkmnAVceoApjrkvBhHYjWb67ondo", "name": "Tesla (Ondo Tokenized)"},
+)
+ONDO_DECIMALS = 9
+
+
+def list_ondo() -> list[dict]:
+    """The verified Ondo tokens, in the same shape as `list_xstocks()`. No HTTP."""
+    return [{**token, "decimals": ONDO_DECIMALS, "issuer": "ondo"} for token in ONDO_TOKENS]
+
+
+def ui_multiplier(entry: dict, now: datetime | None = None) -> Decimal | None:
+    """The scaled-UI multiplier in force, from a price/v3 entry; None if absent.
+
+    Token-2022's scaled-UI-amount extension lets an issuer pay a dividend by
+    raising a multiplier instead of minting: shares = raw tokens x
+    multiplier. Both xStocks and Ondo use it. price/v3 reports
+    `scaledUiConfig` with the current `multiplier` and a scheduled
+    `newMultiplier` that takes over at `newMultiplierEffectiveAt`; once that
+    moment has passed, the new one is in force (checked live: Jupiter's
+    usdPricePrescaled / usdPrice equals newMultiplier after the date).
+    """
+    config = entry.get("scaledUiConfig") if isinstance(entry, dict) else None
+    if not isinstance(config, dict):
+        return None
+    current = config.get("multiplier")
+    upcoming = config.get("newMultiplier")
+    effective_at = str(config.get("newMultiplierEffectiveAt") or "")
+    chosen = current
+    if upcoming not in (None, "") and effective_at:
+        try:
+            moment = datetime.fromisoformat(effective_at.replace("Z", "+00:00"))
+        except ValueError:
+            moment = None
+        if moment is not None and moment <= (now or datetime.now(timezone.utc)):
+            chosen = upcoming
+    try:
+        value = Decimal(str(chosen))
+    except (InvalidOperation, ValueError):
+        return None
+    return value if value > 0 else None
 
 
 # The xStocks list changes on the order of weeks; the trade page asks for it
@@ -328,6 +399,72 @@ def spread_quote(token: dict, last_price: Decimal) -> dict:
         "bid_impact_pct": Decimal(str(bid_body.get("priceImpactPct") or "0")),
         "ask_impact_pct": Decimal(str(ask_body.get("priceImpactPct") or "0")),
         "quote_size_usd": SPREAD_QUOTE_USD,
+    }
+
+
+def _route_labels(body: dict) -> str | None:
+    labels = [
+        str((step.get("swapInfo") or {}).get("label") or "?")
+        for step in body.get("routePlan") or []
+        if isinstance(step, dict)
+    ]
+    return ">".join(labels)[:200] or None
+
+
+def ladder_quote(
+    token: dict,
+    side: str,
+    size_usd: Decimal,
+    share_price: Decimal,
+    multiplier: Decimal | None,
+) -> dict:
+    """One rung of the depth ladder: buy or sell ~`size_usd` of this token now.
+
+    side "buy"  USDC -> token. `size_usd` of USDC in; price = USDC / shares out.
+    side "sell" token -> USDC. ~`size_usd` worth of tokens in (sized from
+                `share_price`, the last swap per share); price = USDC out / shares in.
+
+    Shares are raw tokens x `multiplier` (the scaled-UI amount, None = 1), so
+    `price_usd` is per share and an xStock compares straight to its Ondo twin.
+    Returns {in_amount, out_amount (base units, Decimal), share_amount,
+    usd_amount, price_usd, price_impact_pct, route}. Raises JupiterError
+    (status_code 429 when rate-limited) or ValueError.
+    """
+    decimals = int(token["decimals"])
+    mint = str(token["mint"])
+    scale = multiplier if multiplier and multiplier > 0 else Decimal(1)
+
+    if side == "buy":
+        usd_in = size_usd.quantize(Decimal("0.000001"))
+        in_amount = to_base_units(usd_in, USDC_DECIMALS)
+        body = swap_quote(USDC_MINT, mint, in_amount)
+        out_amount = int(str(body["outAmount"]))
+        shares = from_base_units(out_amount, decimals) * scale
+        usd = usd_in
+    elif side == "sell":
+        if share_price <= 0:
+            raise JupiterError("no last price to size the sell rung from")
+        raw_qty = (size_usd / (share_price * scale)).quantize(Decimal(1).scaleb(-decimals))
+        if raw_qty <= 0:
+            raise JupiterError("sell rung rounds to zero tokens")
+        in_amount = to_base_units(raw_qty, decimals)
+        body = swap_quote(mint, USDC_MINT, in_amount)
+        out_amount = int(str(body["outAmount"]))
+        shares = raw_qty * scale
+        usd = from_base_units(out_amount, USDC_DECIMALS)
+    else:
+        raise ValueError(f"side must be 'buy' or 'sell', not {side!r}")
+
+    if shares <= 0 or usd <= 0:
+        raise JupiterError("quote came back with a zero amount")
+    return {
+        "in_amount": Decimal(in_amount),
+        "out_amount": Decimal(out_amount),
+        "share_amount": shares,
+        "usd_amount": usd,
+        "price_usd": usd / shares,
+        "price_impact_pct": Decimal(str(body.get("priceImpactPct") or "0")),
+        "route": _route_labels(body),
     }
 
 
