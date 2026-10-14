@@ -671,15 +671,24 @@ def document_download_url(account_id: str, document_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def latest_trades(symbols) -> dict[str, dict]:
+def latest_trades(symbols, feed: str | None = None) -> dict[str, dict]:
     """GET /v2/stocks/trades/latest?symbols=A,B,C -> {symbol: trade}.
 
     One round trip for the whole xStocks list instead of one per underlying.
     Symbols Alpaca does not know are simply absent from the answer.
+
+    `feed` pins the source. Checked live 2026-10-13: on this sandbox's plan
+    the latest-trade endpoint refuses `sip` and `overnight` (403
+    "subscription does not permit"), and the default answer is identical to
+    `feed=iex`. IEX's latest trade does include extended-hours prints
+    (condition 'T'), e.g. NVDA at 16:13 ET, but IEX is thin after hours.
     """
     wanted = [symbol for symbol in dict.fromkeys(symbols) if symbol]
     if not wanted:
         return {}
-    body = _data_request("/v2/stocks/trades/latest", {"symbols": ",".join(wanted)})
+    params = {"symbols": ",".join(wanted)}
+    if feed:
+        params["feed"] = feed
+    body = _data_request("/v2/stocks/trades/latest", params)
     trades = (body or {}).get("trades") or {}
     return {symbol: trade for symbol, trade in trades.items() if isinstance(trade, dict)}

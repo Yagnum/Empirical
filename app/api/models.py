@@ -407,6 +407,129 @@ class TokenPrice(Base):
     ask_impact_pct: Mapped[Decimal | None] = mapped_column(Numeric(18, 10))
     quote_size_usd: Mapped[Decimal | None] = mapped_column(MONEY)
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="jupiter_price_v3")
+    # Who issued the token (docs/RESEARCH-COLLECTION.md, series A): 'xstocks'
+    # (Backed) or 'ondo' (Ondo Global Markets, 24/7 mint and redeem). NVDAx
+    # and NVDAon both have underlying NVDA; `symbol` keeps them apart and
+    # `issuer` lets the analysis group them. Rows before this column existed
+    # are all xStocks, hence the server default.
+    issuer: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="xstocks", server_default="xstocks"
+    )
+    # The Token-2022 "scaled UI amount" multiplier in force at sampling time.
+    # Both issuers pass dividends to holders by raising it, and
+    # shares = raw tokens x multiplier. `usd_price` is per share (Jupiter's
+    # own adjustment), but
+    # `bid_usd`/`ask_usd` are per RAW token, as they have been since ADR-020,
+    # so per-share bid = bid_usd / ui_multiplier. Null = no multiplier
+    # reported (treat as 1); null on every row sampled before this column.
+    ui_multiplier: Mapped[Decimal | None] = mapped_column(Numeric(28, 18))
+
+
+class QuoteLadder(Base):
+    """One executable Jupiter quote at a large size: the depth ladder (series B).
+
+    `token_prices` prices ~$1,000 each way. A weekend reserve must cover
+    bigger tickets, so for a handful of tokens we also ask what $10,000 and
+    $50,000 would get, at most once an hour. The distance between the
+    ladder's price and the $1,000 price is the weekend price impact.
+
+    `price_usd` is per SHARE: the raw quote amounts are converted with the
+    token's scaled-UI multiplier, so an xStock and its Ondo twin are directly
+    comparable. A failed rung is still a row: `status` says why ('no_route'
+    at $50k is itself a depth observation; 'rate_limited' is not).
+    """
+
+    __tablename__ = "quote_ladder"
+    __table_args__ = (
+        Index("ix_quote_ladder_symbol_sampled", "symbol", "sampled_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    sampled_at: Mapped[dt.datetime] = mapped_column(TZ, nullable=False, index=True)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)  # NVDAx | NVDAon
+    issuer: Mapped[str] = mapped_column(String(16), nullable=False)  # xstocks | ondo
+    underlying: Mapped[str | None] = mapped_column(String(16))  # NVDA
+    mint: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_usd: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    side: Mapped[str] = mapped_column(String(4), nullable=False)  # 'buy' (ask) | 'sell' (bid)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)  # ok | no_route | rate_limited | error
+    # Raw quote amounts in base units, exactly as Jupiter sent them.
+    in_amount: Mapped[Decimal | None] = mapped_column(Numeric(38, 0))
+    out_amount: Mapped[Decimal | None] = mapped_column(Numeric(38, 0))
+    # The same trade in human units: shares (multiplier applied) and USDC.
+    share_amount: Mapped[Decimal | None] = mapped_column(QTY)
+    usd_amount: Mapped[Decimal | None] = mapped_column(MONEY)
+    price_usd: Mapped[Decimal | None] = mapped_column(MONEY)  # usd_amount / share_amount
+    price_impact_pct: Mapped[Decimal | None] = mapped_column(Numeric(18, 10))
+    ui_multiplier: Mapped[Decimal | None] = mapped_column(Numeric(28, 18))
+    route: Mapped[str | None] = mapped_column(String(200))  # 'Whirlpool>GoonFi V2'
+    error: Mapped[str | None] = mapped_column(String(300))
+
+
+class OraclePrice(Base):
+    """What an on-chain price oracle reported for a share, each run (series C).
+
+    Many oracles freeze at Friday's close and report that stale number all
+    weekend; a lending market that marks a tokenized stock to it is blind
+    while the token moves. This table records Pyth's view - the regular
+    feed (US session hours only) and, where Pyth publishes one, its "24/7"
+    index feed - so the paper can show the freeze next to the token.
+
+    `price`, `conf` and `expo` are Pyth's raw integers (price x 10^expo is
+    dollars); `price_usd`/`conf_usd` are that sum, done in Decimal.
+    `publish_time` is when Pyth last updated the feed; on a Saturday the
+    regular feed's publish_time is still Friday afternoon - that is the
+    finding, not a bug.
+    """
+
+    __tablename__ = "oracle_prices"
+    __table_args__ = (
+        Index("ix_oracle_prices_symbol_sampled", "symbol", "sampled_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    sampled_at: Mapped[dt.datetime] = mapped_column(TZ, nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(16), nullable=False)  # 'pyth'
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)  # NVDA
+    feed_kind: Mapped[str] = mapped_column(String(16), nullable=False)  # regular | index_24_7
+    feed_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    feed_symbol: Mapped[str | None] = mapped_column(String(64))  # Equity.US.NVDA/USD
+    price: Mapped[Decimal] = mapped_column(Numeric(38, 0), nullable=False)
+    conf: Mapped[Decimal | None] = mapped_column(Numeric(38, 0))
+    expo: Mapped[int] = mapped_column(Integer, nullable=False)
+    price_usd: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    conf_usd: Mapped[Decimal | None] = mapped_column(MONEY)
+    publish_time: Mapped[dt.datetime] = mapped_column(TZ, nullable=False)
+
+
+class ShareTrade(Base):
+    """The real share's latest trade, every run, with its feed (series D).
+
+    `token_prices.market_price` already carries this number, but once per
+    TOKEN (NVDAx and NVDAon repeat it) and without saying which feed or
+    which session it came from. The token-leads-share test needs the share
+    side on its own: one row per share per run, with the trade's own time,
+    the feed ('iex' - the only real-time feed the free plan serves), the
+    trade conditions Alpaca reports (e.g. 'T' = extended hours) and the
+    session the trade fell in (premarket, regular, afterhours, overnight,
+    weekend - sessions.py's names).
+    """
+
+    __tablename__ = "share_trades"
+    __table_args__ = (
+        Index("ix_share_trades_symbol_sampled", "symbol", "sampled_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    sampled_at: Mapped[dt.datetime] = mapped_column(TZ, nullable=False, index=True)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)  # NVDA
+    feed: Mapped[str] = mapped_column(String(16), nullable=False)  # 'iex'
+    price: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    size: Mapped[Decimal | None] = mapped_column(QTY)
+    trade_at: Mapped[dt.datetime] = mapped_column(TZ, nullable=False)
+    exchange: Mapped[str | None] = mapped_column(String(8))
+    conditions: Mapped[str | None] = mapped_column(String(64))  # '@,T'
+    session: Mapped[str | None] = mapped_column(String(16))  # sessions.py name at trade_at
 
 
 class TokenCandle(Base):

@@ -44,9 +44,10 @@ SPREAD = {
 @pytest.fixture
 def feeds(monkeypatch):
     monkeypatch.setattr(jupiter, "list_xstocks", lambda: list(TOKENS))
+    monkeypatch.setattr(jupiter, "list_ondo", lambda: [])
     monkeypatch.setattr(jupiter, "prices", lambda mints: dict(QUOTES))
     monkeypatch.setattr(jupiter, "spread_quote", lambda token, last: dict(SPREAD))
-    monkeypatch.setattr(alpaca, "latest_trades", lambda symbols: dict(TRADES))
+    monkeypatch.setattr(alpaca, "latest_trades", lambda symbols, feed=None: dict(TRADES))
     monkeypatch.setattr(alpaca, "get_clock", lambda: {"is_open": True})
     monkeypatch.setattr(sampler, "SPREAD_DELAY_SECONDS", 0)
 

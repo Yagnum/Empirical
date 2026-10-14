@@ -87,6 +87,19 @@ class Settings(BaseSettings):
     # GitHub Actions jobs). Ignored when the keypair is set.
     solana_engine_pubkey: str = ""
 
+    # --- Research collection (docs/RESEARCH-COLLECTION.md) ---
+    # The depth ladder: which tokens, which sizes, how often. Comma lists so
+    # the cron can change them through an env var without a code change.
+    ladder_symbols: str = "SPYx,QQQx,NVDAx,TSLAx,AAPLx,METAx,SPYon,QQQon,NVDAon,TSLAon,AAPLon,METAon"
+    ladder_sizes_usd: str = "10000,50000"
+    ladder_min_interval_minutes: int = 55
+    # Pyth Hermes. Since the Pyth Core upgrade (2026-08-26) every Hermes
+    # price endpoint answers 401 without a key (verified 2026-10-13); the
+    # feed list itself is still public. Empty key = the oracle record is
+    # skipped with one log line, and the rest of the run is unaffected.
+    pyth_api_key: str = ""
+    pyth_hermes_url: str = "https://pyth.dourolabs.app/hermes"
+
     # --- Misc ---
     jup_api_key: str = ""  # also unlocks api.jup.ag for the swap builder
     frontend_origin: str = "http://localhost:3000"
