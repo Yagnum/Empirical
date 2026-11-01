@@ -3,68 +3,79 @@ import { PaperTradingStamp } from "@/components/paper-trading";
 import { formatUsd } from "@/lib/money";
 
 /*
-  The landing page's hero is the artefact itself: one weekend trade under
-  the locked design (ADR-033), the way the weekend trades panel shows it.
+  The landing page's hero: one real weekend trade, told in plain words for
+  someone who has never heard of a token or a reserve (ADR-033).
 
-  Every price is real: trade 125, 10 NVDA sold on the weekend of 2026-10-10
-  at Jupiter's bid of 230.80, the shares sold Monday at 226.15, and the
-  shadow token hedge's two quotes (sold at 230.80, bought back at 226.67).
-  Re-run under the v2 rule on today's parameters: ERR 2,308.02 x 0.98% x
-  3.7742 = 85.37; broker leg -46.52 + token leg +41.31 - gas 0.33 = -5.54
-  leftover; 79.83 back. The panel says it is an illustration.
+  Every figure is trade 98 from the database: 20 NVDA bought on Sunday
+  2026-09-27 at Jupiter's ask of 225.54, the shares bought Monday at
+  229.99, the shadow token hedge's two quotes (bought at 225.54, sold at
+  230.25). Re-run under the v2 rule on today's parameters:
+
+      deposit (ERR)  4,510.79 x 0.98% x 3.7742               = 166.85
+      hedge          broker -89.01 + token +94.19 - gas 0.36 = +4.82
+      returned       166.85 + 4.82                           = 171.67
+      saved          20 x (229.99 - 225.54)                  = 89.01
+
+  It was picked because it went the buyer's way, and the card says that
+  prices can move either way.
 */
 type Row = {
   term: string;
   value: string;
-  tone?: "hero" | "loss";
+  note?: string;
 };
 
 const ROWS: Row[] = [
-  { term: "Saturday: sold 10 NVDA at the token’s live price", value: "230.80", tone: "hero" },
-  { term: "Cash to you that moment", value: "2222.65" },
-  { term: "Reserve held until Monday (3.7%)", value: "85.37" },
-  { term: "Monday: the real shares sold at", value: "226.15" },
-  { term: "The token hedge’s leftover", value: "-5.54", tone: "loss" },
-  { term: "Reserve returned to you", value: "79.83" },
+  { term: "You pay for the shares", value: "4510.79" },
+  { term: "Refundable deposit, held until Monday", value: "166.85" },
+  { term: "Monday: the price NVDA actually traded at", value: "229.99" },
+  { term: "Deposit back on Monday", value: "171.67", note: "+$4.82 extra" },
 ];
 
 export function SpecimenWeekendTrade() {
   return (
     <Panel className="settle-in">
-      <PanelHead title="Specimen weekend trade" aside={<PaperTradingStamp />} />
+      <PanelHead title="A real weekend trade" aside={<PaperTradingStamp />} />
 
-      <dl className="divide-y divide-rule-soft px-6">
+      <div className="px-6 pt-5 pb-4">
+        <p className="text-[13px] text-ink-soft">Sunday · bought 20 shares of NVDA at</p>
+        <p className="mt-1 flex items-baseline gap-3">
+          <span className="figure-nums font-display text-[2rem] leading-none font-bold tracking-[-0.02em] text-ink">
+            {formatUsd("225.54")}
+          </span>
+          <span className="rounded-full bg-accent-wash px-2.5 py-0.5 text-[12px] font-semibold text-accent">
+            price locked
+          </span>
+        </p>
+      </div>
+
+      <dl className="divide-y divide-rule-soft border-t border-rule-soft px-6">
         {ROWS.map((row) => (
           <div
             key={row.term}
-            className="flex items-baseline justify-between gap-6 py-3.5 text-[14px]"
+            className="flex items-baseline justify-between gap-6 py-3 text-[14px]"
           >
-            <dt className={row.tone === "hero" ? "font-medium text-ink" : "text-ink-soft"}>
-              {row.term}
-            </dt>
-            <dd
-              className={
-                row.tone === "hero"
-                  ? "figure-nums shrink-0 font-display text-[1.375rem] font-bold text-ink"
-                  : row.tone === "loss"
-                    ? "figure-nums shrink-0 font-semibold text-loss"
-                    : "figure-nums shrink-0 text-ink"
-              }
-            >
-              {row.tone === "loss" ? `−${formatUsd(row.value.slice(1))}` : formatUsd(row.value)}
+            <dt className="text-ink-soft">{row.term}</dt>
+            <dd className="figure-nums shrink-0 text-right text-ink">
+              {formatUsd(row.value)}
+              {row.note ? (
+                <span className="ml-2 font-semibold text-gain">{row.note}</span>
+              ) : null}
             </dd>
           </div>
         ))}
       </dl>
 
-      <p className="border-t border-rule-soft bg-accent-wash px-6 py-4 text-[13px] leading-relaxed text-ink">
-        <span className="font-semibold">Your price: {formatUsd("230.80")}, locked on Saturday.</span>{" "}
-        NVDA fell by Monday; the token hedge caught all but $5.54 of the
-        move, and that came out of the reserve.
+      <p className="border-t border-rule-soft bg-gain/10 px-6 py-4 text-[14px] leading-relaxed text-ink">
+        <span className="font-semibold">
+          You paid {formatUsd("89.01")} less than buying on Monday
+        </span>
+        , and got your deposit back with {formatUsd("4.82")} on top.
       </p>
 
       <p className="border-t border-rule-soft px-6 py-3 text-[12px] text-ink-faint">
-        Illustration from a real sandbox trade’s prices, not a real account.
+        Real prices from Sept 27–28, 2026, in a practice account. Prices can
+        move either way: here they went in the buyer&rsquo;s favour.
       </p>
     </Panel>
   );

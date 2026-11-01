@@ -17,23 +17,23 @@ import { Wordmark } from "@/components/wordmark";
 
 const STEPS = [
   {
-    title: "Trade at the live price",
-    body: "On a Saturday NVDA has no price, but NVDAx, the token backed by the share, trades around the clock. You trade at the price your order gets right now.",
+    title: "Trade on the weekend",
+    body: "The stock market is closed, but digital tokens backed by real shares trade all weekend. You buy or sell at their live price.",
   },
   {
     title: "Your price is locked",
-    body: "That price is final, whatever Monday brings. Sells are paid on the spot. A small reserve, the ERR, is held until Monday.",
+    body: "Whatever happens by Monday, you keep that price. A small refundable deposit is held in the meantime.",
   },
   {
-    title: "We hedge with the token",
-    body: "The same moment, Yagnum makes the opposite trade in the token, so the weekend move cancels out. On Monday the reserve comes back, plus or minus the hedge's small leftover.",
+    title: "Monday, it settles",
+    body: "The real shares move in your account and your deposit comes back, give or take a little. Behind the scenes we hedge every trade, so weekend price swings cancel out.",
   },
 ];
 
 const FACTS = [
-  { figure: "48 h", label: "every weekend with no stock market" },
-  { figure: "94%", label: "of weekend price risk removed by the token hedge" },
-  { figure: "3.7%", label: "typical reserve with the hedge, down from about 10% without it" },
+  { figure: "48 h", label: "the stock market is closed every weekend" },
+  { figure: "94%", label: "of weekend price risk removed by our hedge" },
+  { figure: "3.7%", label: "typical refundable deposit" },
 ];
 
 export default async function LandingPage() {
@@ -67,15 +67,15 @@ export default async function LandingPage() {
         <section className="mx-auto grid max-w-6xl items-center gap-14 px-6 py-16 lg:grid-cols-[1.05fr_0.95fr] lg:gap-20 lg:py-24">
           <div>
             <p className="font-display text-[15px] font-medium text-accent">
-              24/7 trading, weekends included · U.S. equities · paper money
+              24/7 trading, weekends included · U.S. stocks · practice money
             </p>
             <h1 className="mt-4 font-display text-[clamp(2.5rem,5.5vw,3.75rem)] leading-[1.05] font-bold tracking-[-0.035em] text-balance text-ink">
               Trade the market while it is closed.
             </h1>
             <p className="mt-6 max-w-xl text-[17px] leading-relaxed text-ink-soft">
-              The stock market sleeps every weekend. Tokenized shares do not.
-              Trade real U.S. stocks on a Saturday and keep that price. We hedge
-              the rest with the token.
+              The stock market closes every weekend. With Yagnum you can buy or
+              sell real U.S. stocks on a Saturday or Sunday, at a price you lock
+              in on the spot.
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-3">
               <Link href="/sign-up" className={buttonStyles("primary")}>
@@ -117,7 +117,7 @@ export default async function LandingPage() {
         <section>
           <div className="mx-auto max-w-6xl px-6 py-20">
             <h2 className="font-display text-[1.75rem] leading-tight font-bold tracking-[-0.025em] text-ink">
-              Measured, not guessed
+              Built on real data
             </h2>
             <dl className="mt-10 grid gap-8 sm:grid-cols-3">
               {FACTS.map((fact) => (
