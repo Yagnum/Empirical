@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-120b"
     groq_base_url: str = "https://api.groq.com/openai/v1"
 
+    # --- The weekend design (ADR-033) ---
+    # "locked": the trader keeps the weekend price; Yagnum hedges with the
+    # token on Jupiter, charges a hedge fee, and carries what is left over.
+    # "pass_through": the v1 design (ADR-017/029) - the trader ends at
+    # Monday's price through the ERR true-up. Rows record the design they
+    # opened under, so flipping this never changes an open trade.
+    weekend_design: str = "locked"
+
     # --- Solana (ADR-025: Version B, shadow hedge first) ---
     # The engine wallet. In "shadow" mode every weekend trade builds the
     # on-chain hedge for real (Jupiter swap transaction against this wallet),

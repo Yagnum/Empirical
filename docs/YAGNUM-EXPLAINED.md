@@ -121,7 +121,40 @@ Assumptions for all cases: Q = 10 shares. Fees_est = $2. Fees_actual = $2. ERR_i
 
 Note the pattern. In every case, the trader ends at Monday's price plus or minus fees. Yagnum ends at zero. The ERR is the pipe that moves the gap from one to the other.
 
-### 3f. What Alice actually gets
+### 3f-v2. What Alice gets now: a locked price (ADR-033, from 2026-10-31)
+
+**ELI5.** You sell your bike to a shop on Saturday for $226, and that price
+is yours. The shop is worried bike prices will fall before Monday, so the
+same minute it sells a bike-voucher in the always-open market next door for
+$226. If prices fall, the shop loses on your bike and gains on the voucher:
+the two cancel. You left a small deposit with the shop. On Monday you get it
+back, plus or minus the few dollars by which the bike and the voucher did
+not quite cancel.
+
+**The real example** (trade 125's real prices, re-run under the v2 rule).
+- Alice sells 10 NVDA on Saturday at Jupiter's $230.80. **That is her price.**
+- She posts an ERR of $85.37 (3.7%) and gets $2,222.65 in cash now.
+- Yagnum sells 10 NVDAx on Jupiter at $230.80 the same moment.
+- Monday: the shares sell at $226.15 (broker leg −$46.52); Yagnum buys the
+  NVDAx back at $226.67 (token leg +$41.31); gas $0.33.
+- Leftover: −$46.52 + $41.31 − $0.33 = **−$5.54**. The ERR comes back as
+  $85.37 − $5.54 = **$79.83**. Had the leftover been a profit, it would have
+  come back on top.
+
+**The rule.** The trader's price is final. The ERR carries only the
+hedge's leftover: `ERR_final = ERR_initial + (broker leg + token leg − gas)`,
+refunded to the trader (paper §6b). Yagnum keeps nothing. Because the hedge
+removed 94% of the weekend risk (RQ5), the ERR is about 3.7% instead of 10%.
+
+**The trap.** Locking the price *without* the hedge (ADR-028, reverted)
+puts the whole weekend gap somewhere it cannot be covered. The hedge is what
+makes the lock work. And today the hedge is simulated: priced at real
+quotes, built and signed, never sent.
+
+The section below is the earlier pass-through design. Trades opened before
+2026-10-31 still settle under it.
+
+### 3f. What Alice actually got under pass-through
 
 > **Note, 2026-09-07 (ADR-029).** For a few hours the engine locked the
 > weekend price and kept the gap (ADR-028). That was a misreading of this

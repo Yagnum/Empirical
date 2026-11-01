@@ -19,10 +19,10 @@ import type { WeekendSession, WeekendTrade } from "@/lib/types";
 
   The state machine on screen: open (weekend) -> settling -> settled or
   reserve breached. Open trades carry the settle controls; settled ones
-  show the reconciliation — the fill, the move, what came back — because
-  the whole point of the engine is that this arithmetic is inspectable.
-  The paper's rule: the trader ends at Monday's price; the reserve comes
-  back bigger if the market moved their way, smaller if not.
+  show the reconciliation, because the whole point of the engine is that
+  this arithmetic is inspectable. Two designs share the list (ADR-033): a
+  locked trade keeps its weekend price; an older pass-through trade ended
+  at Monday's price, with the reserve coming back bigger or smaller.
 
   The injected-gap control is the simulator's crash-test lever and renders
   only when the API says the dev toggle exists. It answers the question a
@@ -62,7 +62,7 @@ export function WeekendTradesPanel({
         title="Weekend trades"
         aside={
           <span className="text-[12px] text-ink-faint">
-            settle at the first real price
+            real shares settle when the market reopens
           </span>
         }
       />
@@ -128,6 +128,8 @@ function TradeRow({
               ? ` pretend Monday (${formatGap(trade.injected_gap)})`
               : " when the market reopened"}
           </>
+        ) : trade.design === "locked" ? (
+          <> · locked</>
         ) : (
           <> · {formatUsd(trade.reserve)} reserve held</>
         )}
@@ -158,6 +160,7 @@ function formatGap(fraction: string | null): string {
  * green came back to you, red came out of the reserve.
  */
 function Outcome({ trade }: { trade: WeekendTrade }) {
+  if (trade.design === "locked") return <LockedOutcome trade={trade} />;
   const reserve = formatUsd(trade.reserve);
 
   if (trade.state === "provisional") {
@@ -233,6 +236,69 @@ function Outcome({ trade }: { trade: WeekendTrade }) {
       full {reserve} reserve came back plus the{" "}
       <span className="figure-nums text-gain">+{formatUsd(diff)}</span> the
       price moved your way: {returnedText} in all.
+    </>
+  );
+}
+
+/**
+ * The locked design (ADR-033): the trader kept the weekend price, so the
+ * sentence says so first. Monday's only effect on them is the token hedge's
+ * leftover, which rode on the reserve (paper §6b): a profit came back on
+ * top, a loss came out of it.
+ */
+function LockedOutcome({ trade }: { trade: WeekendTrade }) {
+  const price = <span className="figure-nums text-ink">{formatUsd(trade.p_open)}</span>;
+  const reserve = formatUsd(trade.reserve);
+
+  if (trade.state === "provisional") {
+    return (
+      <>
+        Your price of {price} is final.{" "}
+        {trade.side === "sell" ? "The cash is in your account" : "The shares are paid for"}
+        ; the {reserve} reserve waits for the hedge to close when the market
+        reopens.
+      </>
+    );
+  }
+  if (trade.state === "awaiting_settlement") {
+    return (
+      <>
+        The real shares are trading at the broker now. Your {price} does not
+        change whatever they fill at.
+      </>
+    );
+  }
+  if (trade.state === "breached") {
+    return (
+      <>
+        You kept {price}, but the hedge&rsquo;s leftover was bigger than the
+        whole {reserve} reserve:{" "}
+        <span className="figure-nums text-loss">−{formatUsd(trade.shortfall)}</span>{" "}
+        more came out of your cash.
+      </>
+    );
+  }
+
+  const leftover = toNumber(trade.true_up) ?? 0;
+  const returned = <span className="figure-nums text-ink">{formatUsd(trade.escrow_returned)}</span>;
+  if (Math.abs(leftover) < 0.005) {
+    return <>Settled. You kept {price}, and the whole {reserve} reserve came back.</>;
+  }
+  return (
+    <>
+      Settled. You kept {price}. The hedge{" "}
+      {leftover > 0 ? (
+        <>
+          made <span className="figure-nums text-gain">+{formatUsd(leftover)}</span>, refunded
+          to you:
+        </>
+      ) : (
+        <>
+          lost <span className="figure-nums text-loss">−{formatUsd(-leftover)}</span>, taken from
+          the reserve:
+        </>
+      )}{" "}
+      {returned} of {reserve} came back.
     </>
   );
 }

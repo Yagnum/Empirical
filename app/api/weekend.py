@@ -1,7 +1,27 @@
-"""The ERR engine: weekend trades, from Jupiter quote to Monday true-up.
+"""The ERR engine: weekend trades, from Jupiter quote to Monday settlement.
 
 This module is the paper's §6 running against real sandbox money (ADR-019).
-The story of one SELL, which is the flow everything else mirrors:
+It runs two designs; each trade records the one it opened under.
+
+THE LOCKED PRICE (v2, ADR-033, the default). One SELL:
+
+  OPEN   Jupiter's bid prices the sale: `p_open`, and it is FINAL for the
+         trader. The ERR is journaled to escrow, sized for the hedged
+         leftover (err.compute_locked), and the trader is advanced
+         `qty * p_open`. The same moment Yagnum hedges with the token: it
+         sells `qty` of the xStock on Jupiter (hedge.py - quoted, built,
+         signed, simulated, never sent; the quote is the fill on paper).
+  SETTLE The shares sell at the broker at `p_close`; the proceeds repay the
+         advance. Yagnum buys the token back. The weekend move cancels
+         between the legs, and the paper's §6b runs on what is left:
+             released = reserve + (broker leg + token leg - gas)
+         A leftover profit comes back to the trader on top of the ERR; a
+         leftover loss comes out of it; beyond it, breached (ADR-017).
+
+  A BUY mirrors it: the trader pays p_open + the ERR, Yagnum buys the
+  token, and Monday buys the shares (reimbursed) and sells the token.
+
+THE PASS-THROUGH (v1, ADR-017/029). The story of one SELL:
 
   OPEN (a weekend, real or simulated)
     1. Jupiter's swap quote prices the sale - the bid, for the trader's
@@ -31,8 +51,9 @@ The story of one SELL, which is the flow everything else mirrors:
   reserve; settlement buys the shares for real, the firm reimburses the
   fill, and the escrow returns with the true-up reversed in sign.
 
-  This pass-through IS the paper's design (ADR-029 records the one-day
-  detour into a locked price and why it was wrong).
+  ADR-029 read the paper as this pass-through; the author later clarified
+  that he meant a locked price hedged with tokens (ADR-033). Old trades
+  keep settling under the design they opened with.
 
   DEV-ONLY "injected" settlement skips step 4: `p_close` is chosen
   (p_open * (1 + gap)) instead of filled, and only the escrow half of the
@@ -162,7 +183,10 @@ def price_trade(symbol: str, side: str, qty: Decimal) -> dict:
         raise HTTPException(status_code=502, detail=f"jupiter_unreachable: {exc.message}") from exc
 
     p_open = quote["price"]
-    sizing = err.compute(underlying, qty, p_open)
+    if settings.weekend_design == "locked":
+        sizing = err.compute_locked(underlying, qty, p_open)
+    else:
+        sizing = err.compute(underlying, qty, p_open)
     return {"token": token, "quote": quote, "p_open": p_open, "sizing": sizing}
 
 
@@ -368,6 +392,7 @@ def open_trade(
         sigma_source=sizing["sigma_source"],
         params_generated_at=sizing["params_generated_at"],
         **context,
+        design=sizing["design"],
         state="provisional",
         simulated=sessions.weekend_override(),
         source=source,
@@ -426,9 +451,11 @@ def open_trade(
             description=f"ERR purchase charge ({_fmt(qty)} {trade.symbol} @ {_fmt(_money(p_open))}) - {tag}",
         )
     session.commit()
-    # The shadow hedge (ADR-025): the on-chain mirror of this trade, built
-    # and simulated but never sent. Observational; a failure is recorded on
-    # the leg row and never touches the trade.
+    # The token hedge (ADR-025, ADR-033): Jupiter quote, transaction built,
+    # signed and simulated, never sent. Under the locked design its quoted
+    # price IS the hedge's fill on paper; under pass-through it is the
+    # experiment pricing the alternative. Either way a failure is recorded
+    # on the leg row and never touches the trade.
     _shadow_hedge(session, trade, "open")
     return trade
 
@@ -505,7 +532,12 @@ def _reconcile(session: Session, trade: WeekendTrade, *, sweep: bool) -> Weekend
                 description=f"ERR hedge purchase reimbursed - {tag}",
             )
 
-    true_up = trade.true_up if trade.true_up is not None else _true_up(trade, p_close)
+    if trade.true_up is not None:
+        true_up = trade.true_up
+    elif trade.design == "locked":
+        true_up = _hedge_pnl(session, trade)
+    else:
+        true_up = _true_up(trade, p_close)
     trade.true_up = true_up
     released = trade.reserve + true_up
 
@@ -551,6 +583,38 @@ def _reconcile(session: Session, trade: WeekendTrade, *, sweep: bool) -> Weekend
     if trade.state in ("settled", "breached") and "hedge_shadow_close" not in _event_kinds(session, trade):
         _shadow_hedge(session, trade, "close")
     return trade
+
+
+def _hedge_pnl(session: Session, trade: WeekendTrade) -> Decimal:
+    """The locked design's true-up (ADR-033, paper §6b): the cross-market
+    hedge's net P/L, which the ERR passes back to the trader.
+
+        P&L_net = broker leg + token leg - gas
+
+    The broker leg is the weekend move against Yagnum, the token leg its
+    hedge, so the two nearly cancel and what remains is the leftover -
+    profit refunded on top of the ERR, loss taken out of it. The token
+    hedge's close leg is recorded first, at the same moment as the fill.
+    With no token hedge recorded, the leftover IS the broker leg: the whole
+    move passes through, as in the pass-through design, and the event trail
+    says so.
+    """
+    if "hedge_shadow_close" not in _event_kinds(session, trade):
+        _shadow_hedge(session, trade, "close")
+    broker = _true_up(trade, trade.p_close)
+    closing = hedge.close_leg(session, trade)
+    if closing is not None and closing.chain_pnl is not None:
+        gas = hedge.gas_usd(session, trade)
+        pnl = broker + closing.chain_pnl - gas
+        detail = (
+            f"hedge P/L: broker leg {_fmt(_money(broker))} + token leg {_fmt(closing.chain_pnl)} "
+            f"- gas {_fmt(_money(gas))} = {_fmt(_money(pnl))}"
+        )
+    else:
+        pnl = broker
+        detail = f"no token hedge recorded: the broker leg {_fmt(_money(broker))} passes through whole"
+    _event(session, trade, "hedge_reconciled", amount=_money(pnl), detail=detail)
+    return _money(pnl)
 
 
 def _marketable_limit(symbol: str, side: str) -> Decimal:
@@ -740,11 +804,12 @@ def settle_all_open(session: Session) -> dict:
             continue
         if trade.state in ("settled", "breached"):
             summary[trade.state] += 1
-            summary["log"].append(
-                f"{label}: {trade.state} at {_fmt(_money(trade.p_close))}, "
-                f"reserve back {_fmt(trade.escrow_returned or Decimal('0'))}"
-                + (f", shortfall {_fmt(trade.shortfall)}" if trade.shortfall else "")
+            outcome = f"reserve back {_fmt(trade.escrow_returned or Decimal('0'))}" + (
+                f", shortfall {_fmt(trade.shortfall)}" if trade.shortfall else ""
             )
+            if trade.design == "locked":
+                outcome = f"price kept at {_fmt(_money(trade.p_open))}, {outcome}"
+            summary["log"].append(f"{label}: {trade.state} at {_fmt(_money(trade.p_close))}, {outcome}")
         else:
             summary["awaiting"] += 1
             summary["log"].append(f"{label}: hedge {trade.hedge_order_id} still working")

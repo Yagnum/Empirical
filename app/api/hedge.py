@@ -86,6 +86,22 @@ def _open_leg(session: Session, trade: WeekendTrade) -> HedgeLeg | None:
     ).scalars().first()
 
 
+def close_leg(session: Session, trade: WeekendTrade) -> HedgeLeg | None:
+    """The latest close leg, whose P/L columns the locked design books."""
+    return session.execute(
+        select(HedgeLeg).where(HedgeLeg.trade_id == trade.id, HedgeLeg.leg == "close").order_by(HedgeLeg.id.desc())
+    ).scalars().first()
+
+
+def gas_usd(session: Session, trade: WeekendTrade) -> Decimal:
+    """Both legs' gas in dollars; a leg with no gas figure counts as zero."""
+    total = Decimal("0")
+    for row in (_open_leg(session, trade), close_leg(session, trade)):
+        if row is not None and row.gas_usd is not None:
+            total += row.gas_usd
+    return total
+
+
 def _pnl(trade: WeekendTrade, opened: HedgeLeg, closing: HedgeLeg) -> None:
     """Fill the close leg's three P/L columns (module doc)."""
     if trade.p_close is None:

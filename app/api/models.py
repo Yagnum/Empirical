@@ -328,6 +328,13 @@ class WeekendTrade(Base):
     true_up: Mapped[Decimal | None] = mapped_column(MONEY)
     escrow_returned: Mapped[Decimal | None] = mapped_column(MONEY)
     shortfall: Mapped[Decimal | None] = mapped_column(MONEY)
+    # The design the trade opened under (ADR-033). "pass_through": the
+    # true-up is the weekend move, so the trader ends at p_close. "locked":
+    # the trader keeps p_open, Yagnum hedges with the token, and the true-up
+    # is the hedge's net P/L - the leftover the ERR passes back (paper §6b).
+    design: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pass_through", server_default="pass_through"
+    )
     created_at: Mapped[dt.datetime] = mapped_column(
         TZ, nullable=False, server_default=func.now(), index=True
     )

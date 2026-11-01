@@ -40,6 +40,13 @@ def clean_override():
 
 
 @pytest.fixture(autouse=True)
+def pass_through_design(monkeypatch):
+    """The hand-checked v1 flows below run the pass-through design; the
+    locked-price tests at the end of the file switch it on themselves."""
+    monkeypatch.setattr(settings, "weekend_design", "pass_through")
+
+
+@pytest.fixture(autouse=True)
 def no_calendar_network(monkeypatch):
     """Session routing must never reach Alpaca's calendar from a unit test.
 
@@ -863,3 +870,117 @@ def test_extended_hours_reaches_alpaca(client, monkeypatch):
     assert response.status_code == 200, response.text
     assert sent["extended_hours"] is True
     assert response.json()["extended_hours"] is True
+
+
+# ---------------------------------------------------------------------------
+# v2, the locked price (ADR-033)
+# ---------------------------------------------------------------------------
+#
+# Hand-checked figures, on the pinned parameters (z 3.7759, fees 0) and
+# 2 NVDA at 200: the ERR is 400 x 0.0098 (the hedged leftover's sigma) x
+# 3.7759 = 14.8015... -> ceiling 14.81. Settlement fills at 195.
+
+
+@pytest.fixture
+def locked(monkeypatch):
+    monkeypatch.setattr(settings, "weekend_design", "locked")
+
+
+def _token_hedge(monkeypatch, chain_pnl: str, gas: str):
+    """Stand in for a recorded token hedge: its close leg's P/L and gas."""
+    from types import SimpleNamespace
+
+    import hedge
+
+    monkeypatch.setattr(hedge, "close_leg", lambda session, trade: SimpleNamespace(chain_pnl=Decimal(chain_pnl)))
+    monkeypatch.setattr(hedge, "gas_usd", lambda session, trade: Decimal(gas))
+
+
+def _settle_regular(client, trade, monkeypatch):
+    monkeypatch.setattr(sessions, "scheduled_session", lambda now=None: sessions.REGULAR)
+    return client.post(f"/weekend/orders/{trade['id']}/settle", json={"mode": "market"}).json()
+
+
+def test_locked_err_is_sized_for_the_hedged_leftover(broker):
+    sizing = err.compute_locked("NVDA", Decimal("2"), Decimal("200"))
+    assert sizing["design"] == "locked"
+    assert sizing["sigma_source"] == "hedged_leftover"
+    assert sizing["reserve"] == Decimal("14.81")
+    # The same trade under pass-through holds the share's whole gap: 40.78.
+    assert err.compute("NVDA", Decimal("2"), Decimal("200"))["reserve"] == Decimal("40.78")
+
+
+def test_locked_open_escrows_the_err_and_advances_cash(db_client, broker, locked):
+    trade = _open_sell(db_client)
+
+    assert trade["design"] == "locked"
+    assert trade["reserve"] == "14.81"
+    assert broker.journals[0]["amount"] == "14.81"
+    assert "ERR escrow" in broker.journals[0]["description"]
+    assert broker.journals[1]["amount"] == "400.00"
+
+
+def test_locked_preview_shows_the_design(db_client, broker, locked):
+    sessions.set_weekend_override(True)
+    body = db_client.get("/weekend/preview", params={"symbol": "NVDA", "side": "sell", "qty": "2"}).json()
+    assert body["design"] == "locked"
+    assert body["reserve"] == "14.81"
+
+
+def test_locked_hedge_loss_comes_out_of_the_err(db_client, broker, locked, monkeypatch):
+    trade = _open_sell(db_client)
+    broker.journals.clear()
+    # Sold 2 NVDAx at 200 on the weekend, bought back at 195: +10 on chain.
+    _token_hedge(monkeypatch, chain_pnl="10.00", gas="0.37")
+
+    settled = _settle_regular(db_client, trade, monkeypatch)
+
+    # Broker leg 2 x (195 - 200) = -10, token leg +10, gas 0.37: the
+    # leftover is -0.37, so 14.81 - 0.37 = 14.44 comes back. The trader
+    # kept 200 - Monday's 195 cost them nothing but the leftover.
+    assert settled["state"] == "settled"
+    assert settled["true_up"] == "-0.37"
+    assert settled["escrow_returned"] == "14.44"
+    assert broker.journals[0]["amount"] == "390.00"  # the sale, swept
+    assert broker.journals[1]["amount"] == "14.44"  # the ERR, back
+    kinds = [event["kind"] for event in settled["events"]]
+    assert "hedge_reconciled" in kinds
+
+
+def test_locked_hedge_profit_is_refunded_to_the_trader(db_client, broker, locked, monkeypatch):
+    trade = _open_sell(db_client)
+    # The token fell further than the share: the hedge made 12 on chain.
+    _token_hedge(monkeypatch, chain_pnl="12.00", gas="0.37")
+
+    settled = _settle_regular(db_client, trade, monkeypatch)
+
+    # -10 + 12 - 0.37 = +1.63, refunded on top of the ERR (§6b): 16.44.
+    assert settled["true_up"] == "1.63"
+    assert settled["escrow_returned"] == "16.44"
+
+
+def test_locked_without_a_hedge_passes_the_move_through(db_client, broker, locked, monkeypatch):
+    trade = _open_sell(db_client)
+
+    settled = _settle_regular(db_client, trade, monkeypatch)
+
+    # hedge_mode is off in tests: no token leg, so the whole -10 move is the
+    # leftover, and the event trail says so.
+    assert settled["true_up"] == "-10"
+    assert settled["escrow_returned"] == "4.81"
+    reconciled = [e for e in settled["events"] if e["kind"] == "hedge_reconciled"]
+    assert "passes through whole" in reconciled[0]["detail"]
+
+
+def test_locked_leftover_beyond_the_err_breaches(db_client, broker, locked):
+    trade = _open_sell(db_client)
+    broker.journals.clear()
+
+    settled = db_client.post(
+        f"/weekend/orders/{trade['id']}/settle", json={"mode": "injected", "gap": "-0.2"}
+    ).json()
+
+    # Unhedged, a 20% drop is -80 against a 14.81 ERR: breached, and the
+    # 65.19 beyond it is debited - the paper's shortfall cascade (§6c).
+    assert settled["state"] == "breached"
+    assert settled["shortfall"] == "65.19"

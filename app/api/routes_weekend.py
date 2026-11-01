@@ -72,6 +72,7 @@ def shape_trade(trade: WeekendTrade) -> dict:
         "true_up": _fmt(trade.true_up),
         "escrow_returned": _fmt(trade.escrow_returned),
         "shortfall": _fmt(trade.shortfall),
+        "design": trade.design,
         "created_at": trade.created_at.isoformat() if trade.created_at else None,
         "settled_at": trade.settled_at.isoformat() if trade.settled_at else None,
     }
@@ -171,6 +172,7 @@ def preview(
         "fees": _fmt(sizing["fees"]),
         "reserve": _fmt(sizing["reserve"]),
         "reserve_pct": _fmt(sizing["reserve_pct"].quantize(cent)),
+        "design": sizing["design"],
         "params_generated_at": sizing["params_generated_at"],
         "session": sessions.effective_session(),
     }

@@ -952,3 +952,99 @@ reserve $46.87, a +1% Monday, $51.49 returned). The lesson is recorded so
 it is not repeated: when the owner says "Version B", read the paper's
 section before building.
 
+
+## ADR-030 — Trade-time price context on every weekend trade
+
+**Date**: 2026-10-13 · **Status**: Accepted
+
+**Context**: The gap decomposition (docs/CAPSTONE.md §10) had to rebuild
+each trade's price context from the nearest sampler row, often hours away.
+
+**Decision**: Each weekend trade stores, at open: bid, ask and mid for its
+own size; Alpaca's latest share trade with its time; the basis
+(`mid / share − 1`); where σ came from; and which `research_params.json`
+sized it. One extra Jupiter quote per open. Best effort, like the shadow
+hedge: a failure stores null and writes a `context_partial` event, never
+blocking the trade.
+
+**Consequences**: Older trades keep null and still need the sampler rows.
+Migration `f6a7b8c9d0e1`. See docs/TRADE-TIME-CAPTURE-AND-HALF-DAYS.md.
+
+## ADR-031 — Early-close days route from Alpaca's calendar
+
+**Date**: 2026-10-13 · **Status**: Accepted · **Removes** ADR-021's known limit
+
+**Decision**: The router reads each day's close from the cached calendar
+rows. On a 13:00 close, after-hours runs 13:00–17:00; a Friday half day
+(2026-11-27) or a pre-holiday half day (2026-12-24) routes to the weekend
+engine from 17:00. With no calendar, every day is a full day, as before.
+
+**Consequences**: Assumes Alpaca's extended session ends at 17:00 on early
+closes; to be confirmed on 2026-11-27.
+
+## ADR-032 — Research collection: Ondo control, depth ladder, oracle record, share prints
+
+**Date**: 2026-10-13 · **Status**: Accepted
+
+**Decision**: (A) Eight Ondo tokens, three-source verified, sampled beside
+the xStocks and tagged `token_prices.issuer`, with the Token-2022 UI
+multiplier. (B) `quote_ladder`: $10k/$50k quotes both sides for 12 tokens,
+at most hourly, paced, stopping at the first 429. (C) `oracle_prices` from
+Pyth (needs `PYTH_API_KEY`; skipped without it). (D) `share_trades`: the
+latest IEX print with its session. Each series is best effort.
+
+**Consequences**: A run takes about 2.5 minutes with the ladder (timeout 8).
+`bid_usd/ask_usd` stay per raw token; per share is `/ ui_multiplier`. The
+Ondo series measures DEX liquidity, not Ondo's redemption price. Migration
+`a7b8c9d0e1f2`. See docs/RESEARCH-COLLECTION.md.
+
+## ADR-033 — v2: the weekend price is locked, and Yagnum hedges it with the token
+
+**Date**: 2026-10-31 · **Status**: Accepted · **Supersedes** ADR-029 as the
+default design; pass-through stays supported for old trades and by setting
+
+**Context**: The paper's author clarified what v4 ("Cross-Market Hedging
+Model") means: the trader's weekend price is locked, and Yagnum hedges it
+with tokens. Read that way the paper supports it — Alice's swap completes on
+Saturday (§4a: "Alice receives USDC; Yagnum holds the tokenized exposure"),
+and §6b's P&L is Yagnum's, on "the cross-market hedge". Two lines read the
+other way and are worth a v5 edit: §2 says Yagnum does not "guarantee
+execution prices", and §6b refunds the surplus to "the originating party".
+ADR-028 failed because it locked the price **without** a hedge, leaving
+Yagnum the whole gap; this design hedges it.
+
+RQ5 measured the hedge before building it (notebooks/analysis/rq5_hedge_cost.py,
+108 trades with both legs recorded): it cut Yagnum's per-trade risk from a
+4.06% to a 0.98% standard deviation of notional (94% variance reduction).
+On trades settled within 4 days the leftover's break-even fee was 27–31 bps.
+
+**Decision** (the owner's): the paper's ERR, with the price locked.
+- The trader keeps `p_open` and posts the ERR, refundable (§3, §6b).
+- Yagnum hedges the same moment: customer sells → Yagnum sells the token;
+  Monday it sells the shares at the broker and buys the token back (mirror
+  for buys). The weekend move nearly cancels between the legs.
+- The true-up is the hedge's net P/L, `broker leg + token leg − gas`:
+  `ERR_final = ERR_initial + P&L_net`. A leftover profit is refunded to the
+  trader on top of the ERR; a leftover loss comes out of it; beyond it, the
+  trade is `breached` and the excess debited (§6c, ADR-017). Yagnum keeps
+  nothing and charges no fee ("not a speculative trading protocol", §2).
+- The ERR is the paper's formula (§6d) with σ = 0.98%, the hedged
+  leftover's measured standard deviation, in place of the share's weekend
+  gap: about 3.7% of notional instead of about 10%.
+- **The token hedge stays simulated**: real Jupiter quotes are its fills on
+  paper; the transaction is built, signed and simulated, never sent
+  (ADR-025). With no hedge recorded, the whole move passes through, and the
+  event trail says so. Real sends remain the family's decision.
+
+A flat 0.30% fee with Yagnum keeping the leftover was built first and
+dropped the same day: the owner chose the paper's refundable ERR, "because
+the ERR is the innovation".
+
+**Consequences**: `weekend_trades.design` records each trade's design
+(migration `b8c9d0e1f2a3`); every existing row is `pass_through` and
+settles as it opened; every other column keeps its meaning, with `true_up`
+holding the hedge's leftover on a locked trade. The ticket, trades panel,
+persona rules and landing page describe the locked price. Late settlement
+(CAPSTONE §10) still matters: the token is bought back when the shares
+fill, so a late fill widens the leftover. The research results to date
+were measured under pass-through and stay valid as such.

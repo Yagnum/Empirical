@@ -64,6 +64,7 @@ def compute(symbol: str, qty: Decimal, p_open: Decimal) -> dict:
     notional = qty * p_open
     reserve = (notional * sigma * z + fees).quantize(_CENT, rounding=ROUND_CEILING)
     return {
+        "design": "pass_through",
         "sigma": sigma,
         "sigma_source": sigma_source,
         "z": z,
@@ -72,4 +73,40 @@ def compute(symbol: str, qty: Decimal, p_open: Decimal) -> dict:
         "reserve": reserve,
         "reserve_pct": (reserve / notional * Decimal("100")) if notional else Decimal("0"),
         "params_generated_at": str(params()["generated_at"]),
+    }
+
+
+# ---------------------------------------------------------------------------
+# v2, the locked price (ADR-033)
+# ---------------------------------------------------------------------------
+#
+# The trader keeps the weekend price. Yagnum hedges the same moment with the
+# token on Jupiter (customer sells -> Yagnum sells the token; Monday it sells
+# the real shares and buys the token back), so the weekend move cancels
+# between the legs. The ERR is the paper's (§6b): the trader posts it, and on
+# Monday it comes back as ERR + the hedge's net P/L - the leftover profit
+# refunded, a leftover loss deducted, anything beyond the ERR cascading.
+#
+# Because only the hedge's leftover is at risk, sigma here is the hedged
+# leftover's, measured, not the share's weekend gap (RQ5,
+# notebooks/analysis/rq5_hedge_cost.py, 2026-10-31, 108 settled trades with
+# both hedge legs recorded): the hedge cut the per-trade standard deviation
+# from 4.06% to 0.98% of notional. z stays the pooled measured multiplier.
+
+HEDGED_SIGMA = Decimal("0.0098")
+
+
+def compute_locked(symbol: str, qty: Decimal, p_open: Decimal) -> dict:
+    """The ERR for a locked-price trade: the paper's formula (§6d) with the
+    hedged leftover's sigma in place of the share's weekend gap."""
+    base = compute(symbol, qty, p_open)
+    notional = base["notional"]
+    reserve = (notional * HEDGED_SIGMA * base["z"] + base["fees"]).quantize(_CENT, rounding=ROUND_CEILING)
+    return {
+        **base,
+        "design": "locked",
+        "sigma": HEDGED_SIGMA,
+        "sigma_source": "hedged_leftover",
+        "reserve": reserve,
+        "reserve_pct": (reserve / notional * Decimal("100")) if notional else Decimal("0"),
     }

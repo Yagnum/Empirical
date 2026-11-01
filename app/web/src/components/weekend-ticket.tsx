@@ -21,13 +21,13 @@ import type { OrderSide, WeekendPreview, WeekendSession, WeekendTrade } from "@/
   While no market is open, an order is not an order — it is a weekend trade
   through the ERR engine, and this ticket replaces the regular one. It looks
   like the same trade slip on purpose, but it prices from Jupiter's
-  executable quote and shows the reserve arithmetic in full before anything
-  is confirmed: the trader must see what is held back and why, or the number
-  on Monday will feel like a fee instead of their own collateral coming back
-  adjusted.
+  executable quote and shows the arithmetic in full before anything is
+  confirmed: the reserve held back and why. Under the locked design
+  (ADR-033) it covers only the token hedge's leftover; under pass-through,
+  the whole weekend move.
 
   Whole shares only, and the maths lines are the API's own strings — the
-  browser only formats, never computes the reserve.
+  browser only formats, never computes a fee or a reserve.
 */
 
 const INITIAL: WeekendOrderState = { status: "idle" };
@@ -217,14 +217,17 @@ function PreviewBlock({
   }
 
   const notional = toNumber(preview.notional) ?? 0;
+
   const reserve = toNumber(preview.reserve) ?? 0;
   const nowFigure = side === "sell" ? notional - reserve : notional + reserve;
+  const locked = preview.design === "locked";
+  const quote = `${preview.token_symbol} ${side === "sell" ? "bid" : "ask"}`;
 
   return (
     <div className="mt-6 border-t border-rule-soft pt-4">
       <dl className="text-[14px]">
         <Line
-          term={`${preview.token_symbol} ${side === "sell" ? "bid" : "ask"} for your size`}
+          term={locked ? `Your price, locked (${quote})` : `${quote} for your size`}
           value={formatUsd(preview.p_open)}
         />
         <Line
@@ -242,11 +245,23 @@ function PreviewBlock({
         />
       </dl>
       <p className="mt-3 text-[12px] leading-relaxed text-ink-faint">
-        The reserve is your money, held aside: {preview.symbol}&rsquo;s measured
-        weekend swing ({preview.sigma}) × a safety multiplier ({preview.z}) ×
-        the trade&rsquo;s value. When the market reopens, your trade settles at
-        the first real {preview.symbol} price and the reserve comes back
-        adjusted to it — bigger if the price moved your way, smaller if not.
+        {locked ? (
+          <>
+            This price is final, whatever {preview.symbol} does by Monday.
+            Yagnum makes the opposite trade in {preview.token_symbol} at the
+            same moment, so the weekend move is hedged. The reserve is your
+            money, held aside: on Monday it comes back plus or minus what the
+            hedge made or lost — usually well under 1% of the trade.
+          </>
+        ) : (
+          <>
+            The reserve is your money, held aside: {preview.symbol}&rsquo;s measured
+            weekend swing ({preview.sigma}) × a safety multiplier ({preview.z}) ×
+            the trade&rsquo;s value. When the market reopens, your trade settles at
+            the first real {preview.symbol} price and the reserve comes back
+            adjusted to it — bigger if the price moved your way, smaller if not.
+          </>
+        )}
       </p>
     </div>
   );
@@ -310,7 +325,7 @@ function Review({
         <PaperTradingStamp />
         <p className="mt-2 text-[12px] leading-relaxed text-stamp">
           {simulated
-            ? "Simulated weekend (dev clock). The trade, the reserve and the cash movements are real sandbox operations; only the calendar is pretend."
+            ? "Simulated weekend (dev clock). The trade and the cash movements are real sandbox operations; only the calendar is pretend."
             : "This weekend trade uses simulated money against real token prices. Nothing you own or owe changes."}
         </p>
       </div>
@@ -358,12 +373,24 @@ function TradePlaced({
         at {formatUsd(trade.p_open)}
       </p>
       <p className="mt-3 text-[14px] leading-relaxed text-ink-soft">
-        Your price is locked provisionally and{" "}
-        {trade.side === "sell" ? "the cash is in your account" : "the shares are paid for"}
-        . A reserve of {formatUsd(trade.reserve)} is held aside. When the
-        market reopens, the trade settles at the first real price and the
-        reserve comes back adjusted to it — follow it in the weekend trades
-        list on this page.
+        {trade.design === "locked" ? (
+          <>
+            That price is yours, final, and{" "}
+            {trade.side === "sell" ? "the cash is in your account" : "the shares are paid for"}
+            . A reserve of {formatUsd(trade.reserve)} is held aside and comes
+            back on Monday plus or minus the hedge&rsquo;s leftover — follow it
+            in the weekend trades list on this page.
+          </>
+        ) : (
+          <>
+            Your price is locked provisionally and{" "}
+            {trade.side === "sell" ? "the cash is in your account" : "the shares are paid for"}
+            . A reserve of {formatUsd(trade.reserve)} is held aside. When the
+            market reopens, the trade settles at the first real price and the
+            reserve comes back adjusted to it — follow it in the weekend trades
+            list on this page.
+          </>
+        )}
       </p>
       <div className="mt-6 grid gap-2">
         <Link href="/orders" className={`${buttonStyles("primary")} w-full`}>

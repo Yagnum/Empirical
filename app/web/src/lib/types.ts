@@ -106,9 +106,17 @@ export type WeekendPreview = {
   fees: string;
   reserve: string;
   reserve_pct: string;
+  /**
+   * The design this trade would open under (ADR-033). "locked": the price
+   * is final and the reserve covers only the token hedge's leftover.
+   * "pass_through": the v1 design, the reserve covers the whole weekend move.
+   */
+  design: WeekendDesign;
   params_generated_at: string;
   session: Pick<WeekendSession, "session" | "scheduled" | "simulated">;
 };
+
+export type WeekendDesign = "locked" | "pass_through";
 
 export type WeekendTradeState =
   | "provisional"
@@ -152,6 +160,11 @@ export type WeekendTrade = {
   true_up: string | null;
   escrow_returned: string | null;
   shortfall: string | null;
+  /**
+   * The design the trade opened under; old trades are "pass_through". On a
+   * locked trade `true_up` is the token hedge's net leftover, not the move.
+   */
+  design: WeekendDesign;
   created_at: string | null;
   settled_at: string | null;
   events?: WeekendTradeEvent[];

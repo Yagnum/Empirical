@@ -144,15 +144,26 @@ PERSONAS: list[dict] = [
     },
 ]
 
-RULES = """
-HOW TRADING WORKS RIGHT NOW
-- Session "weekend": the stock market is closed. Your order goes through the ERR engine. A sell is priced at
+WEEKEND_RULES = {
+    "locked": """- Session "weekend": the stock market is closed. Your order goes through the weekend engine. A sell is priced at
+  the token's executable bid on Jupiter and you are paid that cash immediately; a buy is priced at the ask and
+  you pay immediately. That price is LOCKED: it is final, whatever Monday's price turns out to be. Yagnum hedges
+  it with the token. A small refundable reserve (the "weekend_cost_pct" shown per symbol) is held from your cash
+  until Monday, and comes back plus or minus whatever the hedge made or lost - usually well under 1% of the trade. Buys
+  need cash for the notional plus the reserve.
+""",
+    "pass_through": """- Session "weekend": the stock market is closed. Your order goes through the ERR engine. A sell is priced at
   the token's executable bid on Jupiter and you are paid that cash immediately; a buy is priced at the ask
-  and you pay immediately. A reserve (the "reserve_pct" shown per symbol) is held from your cash until Monday.
+  and you pay immediately. A reserve (the "weekend_cost_pct" shown per symbol) is held from your cash until Monday.
   When the market reopens your trade is settled at the real opening price: you end up at MONDAY'S price, not
   the weekend quote, and the reserve comes back adjusted by the difference. If the price moves against you by
   more than the reserve you owe the excess. Buys need cash for the notional plus the reserve.
-- Session "regular": a normal market order at the broker, filled at the market.
+""",
+}
+
+RULES = """
+HOW TRADING WORKS RIGHT NOW
+{weekend_rule}- Session "regular": a normal market order at the broker, filled at the market.
 - Session "premarket" or "afterhours": a limit order at the broker in the extended session, whole shares only.
 - Session "overnight": you cannot trade in this window. Answer "hold".
 - Shares already committed to an open weekend trade cannot be sold again until it settles.
@@ -199,7 +210,7 @@ def _latest_rows(session: Session, token_symbol: str, since: dt.datetime) -> lis
 def price_context(session: Session, underlying: str, now: dt.datetime | None = None) -> dict | None:
     """What a trader would want to know about one symbol, from the sampler's
     rows: token price now, moves over 1h / 24h / since the last regular-hours
-    print, the executable spread, and this symbol's reserve percentage."""
+    print, the executable spread, and what a weekend trade costs here."""
     now = now or dt.datetime.now(dt.timezone.utc)
     token_symbol = f"{underlying}x"
     rows = _latest_rows(session, token_symbol, now - dt.timedelta(hours=26))
@@ -220,10 +231,12 @@ def price_context(session: Session, underlying: str, now: dt.datetime | None = N
     if latest.bid_usd and latest.ask_usd and latest.bid_usd > 0:
         mid = (latest.bid_usd + latest.ask_usd) / 2
         spread_pct = format(((latest.ask_usd - latest.bid_usd) / mid * 100).quantize(Decimal("0.001")), "f")
-    reserve_pct = None
+    # The reserve a weekend trade holds here, under whichever design is live.
+    weekend_cost_pct = None
     try:
-        sizing = err.compute(underlying, Decimal("1"), latest.usd_price)
-        reserve_pct = format((sizing["reserve"] / latest.usd_price * 100).quantize(_CENT), "f")
+        size = err.compute_locked if settings.weekend_design == "locked" else err.compute
+        sizing = size(underlying, Decimal("1"), latest.usd_price)
+        weekend_cost_pct = format((sizing["reserve"] / latest.usd_price * 100).quantize(_CENT), "f")
     except (KeyError, InvalidOperation, ArithmeticError):
         pass
     return {
@@ -240,7 +253,7 @@ def price_context(session: Session, underlying: str, now: dt.datetime | None = N
         "change_24h_pct": _pct(latest.usd_price, day_ago.usd_price if day_ago else None),
         "last_market_price": _fmt(last_open.market_price) if last_open else None,
         "change_since_market_pct": _pct(latest.usd_price, last_open.market_price if last_open else None),
-        "reserve_pct": reserve_pct,
+        "weekend_cost_pct": weekend_cost_pct,
         "as_of": latest.sampled_at.isoformat(timespec="minutes"),
     }
 
@@ -288,7 +301,11 @@ def prompt_for(user: SimUser) -> str:
     return (
         user.persona
         + "\n"
-        + RULES.format(max_notional=format(MAX_NOTIONAL_USD, "f"), max_qty=format(MAX_QTY, "f"))
+        + RULES.format(
+            weekend_rule=WEEKEND_RULES.get(settings.weekend_design, WEEKEND_RULES["locked"]),
+            max_notional=format(MAX_NOTIONAL_USD, "f"),
+            max_qty=format(MAX_QTY, "f"),
+        )
     )
 
 
