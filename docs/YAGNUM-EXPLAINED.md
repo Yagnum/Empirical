@@ -26,7 +26,7 @@ This reaches well beyond our family. Regular U.S. trading runs 9:30 to 4:00 East
 
 A smaller motivation is emergency liquidity. Someone who needs cash on a Saturday cannot sell until the next session, and U.S. settlement then takes one more business day. Yagnum's sale pays out at once. This is a real benefit but a secondary one. It is not why the project exists.
 
-**How big is the risk being managed?** On our settled trades of $100 or more, the move between the weekend token quote and the real share fill had a median size of 2.0% of the trade and a 95th percentile of 10.1%. Those moves include delays in our own settlement (Section 6), but the point stands: a price you cannot lock on Saturday can be far away by the time you can trade.
+**How big is the risk being managed?** On our settled trades of $100 or more, the move between the weekend token quote and the real share fill had a median size of 2.1% of the trade and a 95th percentile of 10.9%. Those moves include delays in our own settlement (Section 6), but the point stands: a price you cannot lock on Saturday can be far away by the time you can trade.
 
 ---
 
@@ -140,7 +140,7 @@ The mechanism is simple, but it connects to several older ideas. Each view below
 
 This is the oldest move in hedging. A grain elevator owner who hedges with futures does not eliminate risk. They exchange the risk of the price of wheat for the much smaller risk of the gap between their wheat and the futures contract: the **basis**. Yagnum does the same thing with a share and its token.
 
-The standard measure of how well this works is hedging effectiveness, the fraction of variance removed (Ederington, 1979). The figure on our data, when both legs close together, is **99.1%**, with a minimum-variance hedge ratio of **0.997**. The ratio is what you would hope for from an instrument backed one-to-one: one token hedges one share.
+The standard measure of how well this works is hedging effectiveness, the fraction of variance removed (Ederington, 1979). The figure on our data, when both legs close together, is **99.3%**, with a minimum-variance hedge ratio of **1.004**. The ratio is what you would hope for from an instrument backed one-to-one: one token hedges one share.
 
 ### 4b. The weekend disappears from the equation
 
@@ -163,10 +163,10 @@ This makes a prediction we could test. Prices behave roughly like a random walk,
 | Time from trade to fill | Trades | Unhedged std (% of trade) | Hedged leftover std |
 | --- | --- | --- | --- |
 | Up to 1.5 days | 18 | 2.38% | **0.37%** |
-| 1.5 to 4 days | 63 | 3.85% | **0.37%** |
-| Over 4 days | 21 | 5.73% | **0.36%** |
+| 1.5 to 4 days | 64 | 4.01% | **0.37%** |
+| Over 4 days | 26 | 7.28% | **0.36%** |
 
-As the wait lengthens, the unhedged risk more than doubles and the leftover does not move. This also changes the meaning of an earlier finding. Under the first design, late settlement explained 46% of the risk. **Under the hedge, late settlement is nearly harmless to the reserve**, as long as both legs close together.
+As the wait lengthens, the unhedged risk triples and the leftover does not move. This also changes the meaning of an earlier finding. Under the first design, late settlement explained 46% of the risk. **Under the hedge, late settlement is nearly harmless to the reserve**, as long as both legs close together.
 
 Two cautions. The bins are small. And almost all of these closes happened while the regulated market was open, when arbitrage is at work. So this says the gap at the close is small, not that the token tracks the share closely all weekend. The algebra says that weekend gap should not matter to the leftover, and Section 6 shows the token does drift over the weekend.
 
@@ -190,69 +190,69 @@ Yagnum therefore behaves less like a market maker and more like a **riskless pri
 
 This is the central empirical question: if the hedge works, how much is left for the reserve to do?
 
-**The data.** 175 weekend trades settled against the broker's market. 138 of them (79%) have both token-hedge quotes recorded. Of those, 117 are $100 or larger. The smaller ones are discussed below. The 117 span 9 weekends and 64 symbol-weekends, with a median trade of $3,150.
+**The data.** 183 weekend trades settled against the broker's market. 146 of them (80%) have both token-hedge quotes recorded. Of those, 124 are $100 or larger. The smaller ones are discussed below. The 124 span 9 weekends and 68 symbol-weekends, with a median trade of $3,259.
 
 ### The headline
 
 **For a typical trade, the ERR absorbs about 0.2% of the trade's value, or roughly 6% of the deposit.**
 
-Measured on the 102 trades whose two Monday legs closed together:
+Measured on the 108 trades whose two Monday legs closed together:
 
 | Measure | Hedged leftover | Unhedged, for comparison |
 | --- | --- | --- |
-| Standard deviation | **0.39%** | 4.15% |
-| Median size | **0.23%** | 2.01% |
-| 90th percentile size | **0.76%** | |
-| 95th percentile size | **0.93%** | 10.17% |
+| Standard deviation | **0.39%** | 4.78% |
+| Median size | **0.23%** | 2.13% |
+| 90th percentile size | **0.69%** | |
+| 95th percentile size | **0.92%** | 10.91% |
 | Largest | **1.10%** | |
-| Variance removed | **99.1%** | |
+| Variance removed | **99.3%** | |
 
-The 95% interval from a bootstrap over weekends is 0.30% to 0.44% for the standard deviation, and 97.9% to 99.6% for variance removed.
+The 95% interval from a bootstrap over weekends is 0.30% to 0.45% for the standard deviation, and 98.8% to 99.7% for variance removed.
 
-In dollars, on this group's median trade of $2,820: an ERR of about $105, a leftover of $5.45 in median size, and a median signed leftover of −$1.78.
+In dollars, on this group's median trade of $3,306: an ERR of about $123, a leftover of $5.93 in median size, and a median signed leftover of −$1.47.
 
 How much of the 3.7% deposit each trade moved:
 
 | Leftover as a share of the deposit | Trades |
 | --- | --- |
-| Under 10% | 72% |
+| Under 10% | 71% |
 | Under 25% | 95% |
 | Under 50% | 100% |
 
-The largest share of an ERR used by a loss was **29.5%**. Reserve breaches: **zero**. The leftover was a profit returned to the trader on **35%** of trades.
+The largest share of an ERR used by a loss was **29.5%**. Reserve breaches: **zero**. The leftover was a profit returned to the trader on **38%** of trades.
 
 ### The cost is real, and it is mostly the spread
 
-The median leftover is −0.155%, so the typical trader gets back slightly less than they put in. That is the true cost of the product. It is not symmetric:
+The median leftover is −0.136%, so the typical trader gets back slightly less than they put in. That is the true cost of the product. It is not symmetric:
 
 | Side | Trades | Median leftover | Standard deviation |
 | --- | --- | --- | --- |
-| Buy | 66 | −0.01% | 0.36% |
+| Buy | 72 | +0.01% | 0.36% |
 | Sell | 36 | −0.24% | 0.34% |
 
 For a customer sell, Yagnum buys the token back on Monday at the ask, and on those trades the ask sat about 0.22% above the share's fill. For a customer buy, Yagnum sells the token at the bid, which sat almost exactly at the share's fill. So token quotes appear to sit with the bid near the share and the ask above it. That fits our separate finding that token spreads are largely set by pool fees (Section 6).
 
 ### A flaw the analysis found in our own measurement
 
-Across all 117 trades, the same calculation gives a standard deviation of 0.96%, not 0.39%. That difference traces to 15 trades, every one of them a customer sell.
+Across all 124 trades, the same calculation gives a standard deviation of 1.16%, not 0.39%. That difference traces to 16 trades, every one of them a customer sell.
 
-When a share sale fills, its proceeds are not immediately transferable. Our engine swept the proceeds first and only then quoted the token buy-back, so when the sweep failed, the buy-back was quoted at a later run, a median of 46 hours after the share had filled. A real hedge would close both legs together. These 15 trades measure two days of drift between a fresh token quote and a stale share fill. They are a bookkeeping artefact, not a measure of hedge quality.
+When a share sale fills, its proceeds are not immediately transferable. Our engine swept the proceeds first and only then quoted the token buy-back, so when the sweep failed, the buy-back was quoted at a later run, a median of 58 hours after the share had filled. A real hedge would close both legs together. These 16 trades measure days of drift between a fresh token quote and a stale share fill. They are a bookkeeping artefact, not a measure of hedge quality.
 
 The split is defined by an operational event, not by outcome, so it is not cherry-picking. All the same, the honest statement gives all the numbers:
 
 | | Trades | Std | Variance removed | Worst loss |
 | --- | --- | --- | --- | --- |
-| Legs closed together | 102 | 0.39% | 99.1% | −1.10% |
-| Delayed buy-back | 15 | 2.46% | 24.5% | −2.85% |
-| All | 117 | 0.96% | 94.3% (interval 90.2% to 97.3%) | −2.85% |
+| Legs closed together | 108 | 0.39% | 99.3% | −1.10% |
+| Delayed buy-back | 16 | 2.95% | None (−5.3%) | −2.85% |
+| All | 124 | 1.16% | 93.6% (interval 88.2% to 97.6%) | −2.85% |
 
-The fix is to quote the buy-back the moment the share fills, before any journal runs (ADR-034).
+New trades now quote the buy-back the moment the share fills, before any journal runs (ADR-034).
 
 ### Sizing the reserve from this
 
 The live ERR uses σ = 0.98%, measured before this artefact was understood. That gives about 3.7% of the trade, against about 10% under the first design. It is larger than these trades needed:
 
-| σ | ERR | Breaches in 102 | Largest use |
+| σ | ERR | Breaches in 108 | Largest use |
 | --- | --- | --- | --- |
 | 0.98% (live) | 3.70% | 0 | 29% |
 | 0.50% | 1.89% | 0 | 57% |
@@ -276,7 +276,7 @@ We have not lowered it. This is in-sample, nine weekends are not evidence about 
 | METAx | 0.37% | 1.39% | $0.6M |
 | AAPLx | 0.39% | 1.99% | $0.7M |
 
-These come from 17 samples over five days, so they are preliminary. The message is still clear: **capacity is the binding constraint.** This is a retail-sized product on today's pools.
+These come from 18 samples over five days, so they are preliminary. The message is still clear: **capacity is the binding constraint.** This is a retail-sized product on today's pools.
 
 ---
 
@@ -324,7 +324,7 @@ So price discovery happens mostly late, and in the hours before the open. **A Sa
 
 **Spreads do not widen at the weekend.** This was our own expectation, and it was wrong. Across 22 symbols and 2,660 symbol-days to mid-October, the weekend spread was 3.6% narrower than in regular hours (p = 0.50), with a 95% interval of about −13% to +7%. Many quotes sit exactly at a pool's fee, such as 53% of QQQx quotes at 0.060%. A spread set by a fixed fee cannot reprice risk, so weekend risk shows up in where the price sits, not in the width of the spread.
 
-**The reserve held under the first design, and the misses had an unexpected cause.** It covered 174 of 176 settlements (98.9%, against a 99% target). We assumed the two META misses came from basis and spread. Breaking the gap into parts rejected that: those two explain about 2% to 3%. The share's own move explained 52%, and **late settlement in our own system explained 46%**.
+**The reserve held under the first design, and the misses had an unexpected cause.** It covered 180 of 182 settlements (98.9%, against a 99% target). We assumed the two META misses came from basis and spread. Breaking the gap into parts rejected that: those two explain about 2% to 3%. The share's own move explained 52%, and **late settlement in our own system explained 46%**.
 
 **The cause of the delay is now known.** The settlement job is scheduled every 10 minutes through the morning. In its 12 most recent runs it actually ran about once a day, between 12:15 and 4:18 p.m. Eastern. GitHub's scheduled workflows are best-effort. That one operational fact is what the 46% was measuring.
 
@@ -340,29 +340,31 @@ This section matters as much as the results.
 
 **The locked-price design is only days old.** It went live on 2026-11-01. For two months the engine ran the earlier design, where the trader ended at Monday's price, because that is how we first read the proposal. Its author then clarified the intent. So nearly every number in Section 5 is a **counterfactual**, recomputed from real recorded quotes and fills, rather than the record of a live locked trade.
 
-**The live record is small, and it exposed real defects.** Six locked trades opened in the first days:
+**The live record is small, and it exposed real defects.** Six locked trades opened in the first days, and only two initially behaved as designed:
 
 | Trade | ERR | What happened |
 | --- | --- | --- |
 | COIN sell | $81.30 | Worked. Leftover −$6.26, $75.04 returned |
 | QQQ buy | $11.38 | Worked. Leftover +$0.63, $12.01 returned |
-| NVDA sell | $227.97 | **The opening journal failed**, so no deposit was taken and no cash advanced, yet the trade stayed alive and settled, passing the whole −$84.81 through |
-| SPY sell | $7.92 | **The closing quote hit a rate limit**, so the whole −$3.02 passed through |
-| META buy | $3.20 | **Stuck.** The broker refused the purchase for lack of buying power |
-| NVDA buy | $355.35 | **Stuck**, for the same reason |
+| META buy | $3.20 | **Stuck for four days** with no buying power. After the fix: leftover −$0.14, $3.06 returned |
+| NVDA buy | $355.35 | **Stuck for four days**, for the same reason. After the fix: worked (below) |
+| NVDA sell | $227.97 | **The opening journal failed**, so no deposit was taken and no cash advanced, yet the trade stayed alive and settled, passing the whole −$84.81 through. Its cash has been repaired |
+| SPY sell | $7.92 | **The closing quote hit a rate limit**, so the whole −$3.02 passed through. This would now wait for a price |
 
-Only two of six behaved as designed. Tracing the rest found problems larger than those six trades:
+The NVDA buy is the best single example we have. NVDA fell 10.8% between the trade and the fill, a $1,035.86 move. The token leg offset $1,028.41 of it, and the leftover was **+$7.18 on a $9,607 trade**, or 0.07%, refunded to the trader. It settled four days after it opened, which also illustrates Section 4b.
 
-| Defect | Scale | The fix (ADR-034) |
+Tracing the failures found problems larger than those six trades:
+
+| Defect | Scale | The fix (ADR-034, live) |
 | --- | --- | --- |
-| A refused opening journal left the trade alive, and it later settled with nothing behind it | 34 persona trades, 28 already settled | Such a trade is now marked failed and never settles |
-| A buy's cash had already gone to the firm, so the broker refused the shares | Most of the stuck buys | The firm funds the purchase before the order |
-| A failed quote silently broke the lock | 10 quote failures recorded | Quotes retry, and the trade waits for a price rather than passing the move through |
-| The buy-back was priced after the sweep | 15 sells, a median of 46 hours late | The buy-back is priced at the fill |
-| Settlement ran about once a day, hours after the open | Every recent run | The job now starts hours early and waits for the open |
+| A refused opening journal left the trade alive, and it later settled with nothing behind it | 34 persona trades, 28 already settled | Such a trade is now marked failed and never settles. The 6 still open were voided, and the cash from the 28 was corrected with one logged journal each, $90,531 in all |
+| A buy's cash had already gone to the firm, so the broker refused the shares | Stuck buys, some since September | The firm funds the purchase before the order. All were settled on 2026-11-05 |
+| A failed quote silently broke the lock | 10 quote failures recorded | Quotes retry, and a trade waits for a price rather than passing the move through |
+| The buy-back was priced after the sweep | 16 sells, a median of 58 hours late | The buy-back is priced at the fill |
+| Settlement ran about once a day, hours after the open | Every recent run | The job now starts hours early and waits for the open. **Not yet confirmed on a live Monday** |
 | No flat gas term in the ERR | All 4 breaches | A $0.40 term |
 
-These fixes are written and tested (290 tests pass), **but they are not yet live, and nothing has yet confirmed them on a real Monday**. The 28 settled unfunded trades also left their simulated accounts with wrong cash balances, which have not been repaired. All of these were persona trades in a sandbox, and their market prices are real, so the price research stands. But they mean an earlier statement in this project, that the engine's arithmetic was correct, was too broad: the arithmetic was right when the money had moved, and the engine failed to check that it had.
+As of 2026-11-05 no weekend trades remain open, and 290 tests pass. All of these were persona trades in a sandbox, and their market prices are real, so the price research stands. But an earlier statement in this project, that the engine's arithmetic was correct, was too broad: the arithmetic was right when the money had moved, and the engine failed to check that it had.
 
 **A DEX cannot short.** This is the largest open design problem. To hedge a customer sell, Yagnum must sell a token it already holds. So a real version must carry inventory, and that inventory has price risk unless it is hedged in turn. Offsetting customer flow would help: in our simulated flow, netting buys against sells within each symbol and weekend would cut hedge volume by 37%, though simulated flow proves little about real flow. Customer buys have no such problem. Today's simulation hides this, because an empty wallet can still get a quote.
 
@@ -400,7 +402,7 @@ If a regulated weekend venue succeeds, the token hedge may become unnecessary. W
 | Broker fills | **Sandbox** fills |
 | Token hedge transactions | **Built, signed and simulated on mainnet. Never sent** |
 | Gas figures | **Real** arithmetic from assembled transactions |
-| Settlement arithmetic | **Real**, checked by hand to the cent on funded trades (see Section 7 for the unfunded ones) |
+| Settlement arithmetic | **Real**, checked by hand to the cent on funded trades (Section 7 covers the unfunded ones, since repaired) |
 | The website and automation | **Real and running**, at `yagnum-web.azurewebsites.net` |
 
 **Who did what.** The proposal and its formulas were written by my father. The research questions and engineering decisions are mine, recorded in 34 architecture decision records. The code and the analysis scripts were written by an AI coding agent under my direction, and I am responsible for checking them. That is why this document names the cases where the numbers were wrong.

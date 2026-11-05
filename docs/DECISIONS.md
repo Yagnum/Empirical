@@ -1089,7 +1089,13 @@ The ERR also had no flat term, so gas exceeded it on very small trades.
 - The ERR gains the proposal's `Fees_est`, $0.40. Re-measured, it has no breaches
   at any size. σ stays 0.98%: the evidence for lowering it is nine calm weekends.
 
-**Consequences**: The 28 settled unfunded trades keep their records. Their sandbox
-cash is wrong (proceeds swept with no advance paid), and repairing it is a separate
-decision. Their prices are real, so the price research stands. The watch job's
-real behaviour can only be confirmed on a live Monday. Migration `c9d0e1f2a3b4`.
+**Repair** (the owner's decision, 2026-11-05): the 6 unfunded trades still open
+were voided. The 28 already settled keep their `settled` state and real prices, so
+the price research stands, but each had moved cash around an order that was the
+customer's own. `scripts/repair_unfunded_trades.py` reversed each one's recorded
+net with one tagged journal and a `cash_repaired` event: $76,053.04 to traders and
+$14,478.48 to the firm.
+
+**Consequences**: Settling the 8 remaining open trades on 2026-11-05 confirmed the
+funded-buy path against the sandbox. The watch job's scheduling can only be
+confirmed on a live Monday. Migration `c9d0e1f2a3b4`.
