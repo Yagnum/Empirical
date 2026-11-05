@@ -122,7 +122,8 @@ export type WeekendTradeState =
   | "provisional"
   | "awaiting_settlement"
   | "settled"
-  | "breached";
+  | "breached"
+  | "failed";
 
 export type WeekendTradeEvent = {
   at: string | null;

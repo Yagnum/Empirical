@@ -248,6 +248,8 @@ class WeekendTrade(Base):
         breached              the gap ate more than the whole reserve; the
                               excess was debited (escrow is collateral, not a
                               cap - ADR-017).
+        failed                the opening cash could not move, so the trade
+                              never happened and never settles (ADR-034).
 
     `simulated` marks trades opened under the dev weekend override, so a row
     from the simulator can never be mistaken for a real weekend later.
@@ -264,7 +266,7 @@ class WeekendTrade(Base):
     __table_args__ = (
         CheckConstraint("side in ('buy','sell')", name="side"),
         CheckConstraint(
-            "state in ('provisional','awaiting_settlement','settled','breached')",
+            "state in ('provisional','awaiting_settlement','settled','breached','failed')",
             name="state",
         ),
         Index("ix_weekend_trades_account_created", "alpaca_account_id", "created_at"),

@@ -1,15 +1,16 @@
 # Settle open weekend trades into the first regulated session (ADR-023).
 #
-# Every ten minutes from 8:00 AM ET on weekday mornings the engine places
-# the hedge for each open weekend trade (a marketable limit in premarket,
-# rolling into the 9:30 auction as a day order) and reconciles the fills.
-# Idempotent: a trade still waiting on its order is simply checked again;
-# a holiday or weekend run finds no session and exits.
+# GitHub's cron is best effort: scheduled for every ten minutes through the
+# morning, this job in practice started once a day, hours after the open
+# (ADR-034). So it now fires well BEFORE the open and waits. `--watch` stays
+# alive until regular hours, settles every open trade, and keeps checking until
+# nothing is left. A run that starts on time waits a few hours for nothing but
+# the clock; a run that GitHub delays by hours still reaches the open.
 #
-# The cron is UTC. 12:00-15:50 UTC is 8:00-11:50 AM during Eastern Daylight
-# Time and 7:00-10:50 AM in Eastern Standard Time - both inside premarket or
-# the regular session, which is all the job needs; the session router in
-# sessions.py decides what kind of order fits the moment.
+# The cron is UTC. 07:17-11:17 UTC is 2:17-6:17 AM Eastern in winter and an hour
+# later in summer. Public-repo Actions minutes are free, and the concurrency
+# group keeps later firings from running alongside a watch already in progress.
+# With no open trades a run exits at once.
 #
 # Secrets: the same DATABASE_URL, ALPACA_BROKER_ID and ALPACA_BROKER_SECRET
 # the sampler uses. This job DOES place orders and move cash - in the
@@ -18,7 +19,7 @@ name: Settle weekend trades
 
 on:
   schedule:
-    - cron: "2-52/10 12-15 * * 1-5"
+    - cron: "17 7-11 * * 1-5"
   workflow_dispatch:
 
 concurrency:
@@ -29,7 +30,7 @@ jobs:
   settle:
     if: github.repository_owner == 'Yagnum'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 355
     defaults:
       run:
         working-directory: app/api
@@ -39,7 +40,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --frozen --no-dev
-      - run: uv run python scripts/settle_weekend.py --write
+      - run: uv run python scripts/settle_weekend.py --watch
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ALPACA_BROKER_ID: ${{ secrets.ALPACA_BROKER_ID }}

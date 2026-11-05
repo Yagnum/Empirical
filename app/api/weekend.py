@@ -100,6 +100,11 @@ _FILL_POLL_SECONDS = 1.5
 # loose enough to cross the spread.
 _MARKETABLE_OFFSET = Decimal("0.005")
 
+# A buy's funding sits this far above its marketable limit, so a move between
+# the journal and the fill does not bounce the order. The excess comes back at
+# reconciliation.
+_PREFUND_BUFFER = Decimal("1.02")
+
 
 def _money(value: Decimal) -> Decimal:
     return value.quantize(_CENT, rounding=ROUND_HALF_UP)
@@ -418,38 +423,57 @@ def open_trade(
         )
 
     tag = f"weekend trade {trade.id}"
-    trade.escrow_journal_id = _journal(
-        session,
-        trade,
-        from_account=account_id,
-        to_account=firm,
-        amount=sizing["reserve"],
-        kind="escrow_reserved",
-        description=f"ERR escrow - {tag}",
-    )
-
-    if side == "sell":
-        # The advance: sold now means paid now.
-        trade.advance_journal_id = _journal(
-            session,
-            trade,
-            from_account=firm,
-            to_account=account_id,
-            amount=notional,
-            kind="advance_paid",
-            description=f"ERR advance ({_fmt(qty)} {trade.symbol} @ {_fmt(_money(p_open))}) - {tag}",
-        )
-    else:
-        # The mirror: bought now means paid-for now.
-        trade.advance_journal_id = _journal(
+    try:
+        trade.escrow_journal_id = _journal(
             session,
             trade,
             from_account=account_id,
             to_account=firm,
-            amount=notional,
-            kind="charge_paid",
-            description=f"ERR purchase charge ({_fmt(qty)} {trade.symbol} @ {_fmt(_money(p_open))}) - {tag}",
+            amount=sizing["reserve"],
+            kind="escrow_reserved",
+            description=f"ERR escrow - {tag}",
         )
+    except HTTPException:
+        # Nothing has moved, so nothing may settle later (ADR-034).
+        _fail_open(session, trade, "the reserve could not be journaled; no money moved")
+        raise
+
+    try:
+        if side == "sell":
+            # The advance: sold now means paid now.
+            trade.advance_journal_id = _journal(
+                session,
+                trade,
+                from_account=firm,
+                to_account=account_id,
+                amount=notional,
+                kind="advance_paid",
+                description=f"ERR advance ({_fmt(qty)} {trade.symbol} @ {_fmt(_money(p_open))}) - {tag}",
+            )
+        else:
+            # The mirror: bought now means paid-for now.
+            trade.advance_journal_id = _journal(
+                session,
+                trade,
+                from_account=account_id,
+                to_account=firm,
+                amount=notional,
+                kind="charge_paid",
+                description=f"ERR purchase charge ({_fmt(qty)} {trade.symbol} @ {_fmt(_money(p_open))}) - {tag}",
+            )
+    except HTTPException:
+        # The reserve did move: hand it back, then fail the trade.
+        _journal(
+            session,
+            trade,
+            from_account=firm,
+            to_account=account_id,
+            amount=sizing["reserve"],
+            kind="escrow_refunded",
+            description=f"ERR escrow refunded, trade did not open - {tag}",
+        )
+        _fail_open(session, trade, "the trade's cash could not be journaled; the reserve was refunded")
+        raise
     session.commit()
     # The token hedge (ADR-025, ADR-033): Jupiter quote, transaction built,
     # signed and simulated, never sent. Under the locked design its quoted
@@ -463,6 +487,13 @@ def open_trade(
 # ---------------------------------------------------------------------------
 # Settlement
 # ---------------------------------------------------------------------------
+
+
+def _fail_open(session: Session, trade: WeekendTrade, why: str) -> None:
+    """A trade whose opening cash did not move never happened (ADR-034)."""
+    trade.state = "failed"
+    session.commit()
+    _event(session, trade, "open_failed", detail=why)
 
 
 def _shadow_hedge(session: Session, trade: WeekendTrade, leg: str) -> None:
@@ -520,22 +551,30 @@ def _reconcile(session: Session, trade: WeekendTrade, *, sweep: bool) -> Weekend
                 description=f"ERR hedge proceeds swept - {tag}",
             )
         else:
-            # The real purchase came out of the trader's cash; the firm
-            # reimburses it - the trader already paid at p_open.
+            # The real purchase came out of the trader's cash, and the trader
+            # already paid at p_open, so the firm covers it. It funded most of
+            # it before the order (_prefund_buy); only the difference moves.
+            owed = fill_value - _prefunded(session, trade)
             _journal(
                 session,
                 trade,
-                from_account=firm,
-                to_account=trade.alpaca_account_id,
-                amount=fill_value,
+                from_account=firm if owed >= 0 else trade.alpaca_account_id,
+                to_account=trade.alpaca_account_id if owed >= 0 else firm,
+                amount=abs(owed),
                 kind="hedge_swept",
-                description=f"ERR hedge purchase reimbursed - {tag}",
+                description=f"ERR hedge purchase reconciled - {tag}",
             )
 
     if trade.true_up is not None:
         true_up = trade.true_up
     elif trade.design == "locked":
         true_up = _hedge_pnl(session, trade)
+        if true_up is None:
+            # No buy-back price yet. Passing the whole move through would
+            # break the lock, so the trade waits for the next run (ADR-034).
+            trade.state = "awaiting_settlement"
+            session.commit()
+            return trade
     else:
         true_up = _true_up(trade, p_close)
     trade.true_up = true_up
@@ -585,7 +624,7 @@ def _reconcile(session: Session, trade: WeekendTrade, *, sweep: bool) -> Weekend
     return trade
 
 
-def _hedge_pnl(session: Session, trade: WeekendTrade) -> Decimal:
+def _hedge_pnl(session: Session, trade: WeekendTrade) -> Decimal | None:
     """The locked design's true-up (ADR-033, paper §6b): the cross-market
     hedge's net P/L, which the ERR passes back to the trader.
 
@@ -593,16 +632,21 @@ def _hedge_pnl(session: Session, trade: WeekendTrade) -> Decimal:
 
     The broker leg is the weekend move against Yagnum, the token leg its
     hedge, so the two nearly cancel and what remains is the leftover -
-    profit refunded on top of the ERR, loss taken out of it. The token
-    hedge's close leg is recorded first, at the same moment as the fill.
-    With no token hedge recorded, the leftover IS the broker leg: the whole
-    move passes through, as in the pass-through design, and the event trail
-    says so.
+    profit refunded on top of the ERR, loss taken out of it.
+
+    The buy-back is priced when the share fills (_check_hedge_fill). If that
+    quote failed, this tries once more; if there is still no price it returns
+    None and the trade waits. Only with the hedge switched off entirely does
+    the whole move pass through.
     """
-    if "hedge_shadow_close" not in _event_kinds(session, trade):
-        _shadow_hedge(session, trade, "close")
     broker = _true_up(trade, trade.p_close)
     closing = hedge.close_leg(session, trade)
+    if hedge.enabled() and (closing is None or closing.chain_pnl is None):
+        _shadow_hedge(session, trade, "close")
+        closing = hedge.close_leg(session, trade)
+        if closing is None or closing.chain_pnl is None:
+            _event(session, trade, "hedge_close_pending", detail="no buy-back price yet; the trade waits")
+            return None
     if closing is not None and closing.chain_pnl is not None:
         gas = hedge.gas_usd(session, trade)
         pnl = broker + closing.chain_pnl - gas
@@ -612,9 +656,38 @@ def _hedge_pnl(session: Session, trade: WeekendTrade) -> Decimal:
         )
     else:
         pnl = broker
-        detail = f"no token hedge recorded: the broker leg {_fmt(_money(broker))} passes through whole"
+        detail = f"hedge switched off: the broker leg {_fmt(_money(broker))} passes through whole"
     _event(session, trade, "hedge_reconciled", amount=_money(pnl), detail=detail)
     return _money(pnl)
+
+
+def _prefunded(session: Session, trade: WeekendTrade) -> Decimal:
+    rows = session.execute(
+        select(WeekendTradeEvent.amount).where(
+            WeekendTradeEvent.trade_id == trade.id, WeekendTradeEvent.kind == "hedge_prefunded"
+        )
+    )
+    return sum((amount or Decimal("0") for (amount,) in rows), Decimal("0"))
+
+
+def _prefund_buy(session: Session, trade: WeekendTrade) -> None:
+    """Put the cash for a buy's shares in the trader's account before the order.
+
+    The trader paid the firm at p_open on the weekend, so without this the
+    broker sees an account that cannot afford the shares and refuses the order
+    (ADR-034). Once per trade: a refused order retries without funding twice.
+    """
+    if trade.side != "buy" or "hedge_prefunded" in _event_kinds(session, trade):
+        return
+    _journal(
+        session,
+        trade,
+        from_account=_require_firm_account(),
+        to_account=trade.alpaca_account_id,
+        amount=trade.qty * _marketable_limit(trade.symbol, "buy") * _PREFUND_BUFFER,
+        kind="hedge_prefunded",
+        description=f"ERR hedge purchase funded - weekend trade {trade.id}",
+    )
 
 
 def _marketable_limit(symbol: str, side: str) -> Decimal:
@@ -643,6 +716,8 @@ def _place_hedge(session: Session, trade: WeekendTrade) -> None:
             status_code=409,
             detail="market_closed: no regulated session is open to settle into (use injected mode in dev)",
         )
+
+    _prefund_buy(session, trade)
 
     payload: dict = {
         "symbol": trade.symbol,
@@ -697,6 +772,10 @@ def _check_hedge_fill(session: Session, trade: WeekendTrade, *, wait: bool) -> W
                 ref=trade.hedge_order_id,
                 detail=f"filled at {order.get('filled_avg_price')}",
             )
+            # The token buy-back is priced at this instant, before any journal.
+            # Sale proceeds can be untransferable for a day, and a hedge's two
+            # legs must close together (ADR-034).
+            _shadow_hedge(session, trade, "close")
             return _reconcile(session, trade, sweep=True)
         if status in ("canceled", "expired", "rejected"):
             # The hedge died without filling; the trade goes back to
@@ -729,7 +808,7 @@ def settle(
                      advance repayment - only the escrow half of the books,
                      which is the half the gap maths lives in.
     """
-    if trade.state in ("settled", "breached"):
+    if trade.state in ("settled", "breached", "failed"):
         raise HTTPException(status_code=409, detail=f"already_{trade.state}")
 
     if mode == "injected":
@@ -764,7 +843,7 @@ def settle(
     # awaiting_settlement: either the fill landed since last time, or the
     # reconciliation itself needs finishing (p_close known, journals not).
     if trade.p_close is not None:
-        return _reconcile(session, trade, sweep=True)
+        return _reconcile(session, trade, sweep=trade.settlement_mode != "injected")
     return _check_hedge_fill(session, trade, wait=True)
 
 

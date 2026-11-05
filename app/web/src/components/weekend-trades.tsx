@@ -35,6 +35,7 @@ const STATE_LABEL: Record<WeekendTrade["state"], string> = {
   awaiting_settlement: "Settling",
   settled: "Settled",
   breached: "Reserve breached",
+  failed: "Did not open",
 };
 
 export function WeekendTradesPanel({
@@ -128,7 +129,7 @@ function TradeRow({
               ? ` pretend Monday (${formatGap(trade.injected_gap)})`
               : " when the market reopened"}
           </>
-        ) : trade.design === "locked" ? (
+        ) : trade.state === "failed" ? null : trade.design === "locked" ? (
           <> · locked</>
         ) : (
           <> · {formatUsd(trade.reserve)} reserve held</>
@@ -160,6 +161,9 @@ function formatGap(fraction: string | null): string {
  * green came back to you, red came out of the reserve.
  */
 function Outcome({ trade }: { trade: WeekendTrade }) {
+  if (trade.state === "failed") {
+    return <>This trade did not go through, and no money moved.</>;
+  }
   if (trade.design === "locked") return <LockedOutcome trade={trade} />;
   const reserve = formatUsd(trade.reserve);
 

@@ -1048,3 +1048,48 @@ persona rules and landing page describe the locked price. Late settlement
 (CAPSTONE §10) still matters: the token is bought back when the shares
 fill, so a late fill widens the leftover. The research results to date
 were measured under pass-through and stay valid as such.
+
+## ADR-034 — Hardening the locked price: what the first live trades exposed
+
+**Date**: 2026-11-05 · **Status**: Accepted
+
+**Context**: Of the first six locked trades, two behaved as designed. Tracing the
+rest found five defects:
+
+1. **Unfunded trades.** A refused opening journal raised an error but left the
+   trade `provisional`. The settlement job then traded the shares and ran the
+   reconciliation as if it had been funded. 34 persona trades were affected, 28
+   of them already settled. Their open legs were never recorded either, which
+   accounts for most of the trades missing a hedge quote.
+2. **Stuck buys.** The trader pays the firm at the weekend price, so on Monday the
+   broker sees an account that cannot afford the shares and refuses the order.
+3. **Rate limits broke the lock.** A failed quote fell through to passing the whole
+   move to the trader.
+4. **Unsynchronised legs.** The token buy-back was quoted after the sale's proceeds
+   swept. Proceeds can be untransferable for days, so on 15 sells the buy-back was
+   a median of 46 hours late, which inflated the measured risk from a 0.39% to a
+   0.96% standard deviation.
+5. **Late settlement.** Scheduled every ten minutes, the job started about once a
+   day, hours after the open.
+
+The ERR also had no flat term, so gas exceeded it on very small trades.
+
+**Decision**:
+- A new `failed` state. A refused opening journal fails the trade, refunding the
+  reserve if it already moved. A failed trade never settles.
+  `scripts/void_unfunded_trades.py` clears those still open.
+- The firm funds a buy before its order, once per trade, at the marketable limit
+  plus 2%. Reconciliation moves only the difference.
+- Quotes and swap builds retry on a 429. A lost open leg falls back to `p_open`,
+  which is the same quote. If there is still no buy-back price the trade waits for
+  the next run: the whole move passes through only with the hedge switched off.
+- The buy-back is priced the moment the share fills, before any journal.
+- `settle_weekend.py --watch`: the job fires hours before the open and waits, so a
+  delayed start still reaches it. Free on a public repo, with no new service.
+- The ERR gains the proposal's `Fees_est`, $0.40. Re-measured, it has no breaches
+  at any size. σ stays 0.98%: the evidence for lowering it is nine calm weekends.
+
+**Consequences**: The 28 settled unfunded trades keep their records. Their sandbox
+cash is wrong (proceeds swept with no advance paid), and repairing it is a separate
+decision. Their prices are real, so the price research stands. The watch job's
+real behaviour can only be confirmed on a live Monday. Migration `c9d0e1f2a3b4`.

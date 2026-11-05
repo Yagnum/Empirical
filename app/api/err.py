@@ -95,18 +95,25 @@ def compute(symbol: str, qty: Decimal, p_open: Decimal) -> dict:
 
 HEDGED_SIGMA = Decimal("0.0098")
 
+# The proposal's Fees_est. Gas is flat, about $0.34 for the two legs (mostly a
+# refundable token-account deposit), and a percentage ERR cannot cover it on a
+# very small trade: every breach in the data was a trade of about $10 or less.
+LOCKED_FEES_EST = Decimal("0.40")
+
 
 def compute_locked(symbol: str, qty: Decimal, p_open: Decimal) -> dict:
     """The ERR for a locked-price trade: the paper's formula (§6d) with the
     hedged leftover's sigma in place of the share's weekend gap."""
     base = compute(symbol, qty, p_open)
     notional = base["notional"]
-    reserve = (notional * HEDGED_SIGMA * base["z"] + base["fees"]).quantize(_CENT, rounding=ROUND_CEILING)
+    fees = max(base["fees"], LOCKED_FEES_EST)
+    reserve = (notional * HEDGED_SIGMA * base["z"] + fees).quantize(_CENT, rounding=ROUND_CEILING)
     return {
         **base,
         "design": "locked",
         "sigma": HEDGED_SIGMA,
         "sigma_source": "hedged_leftover",
+        "fees": fees,
         "reserve": reserve,
         "reserve_pct": (reserve / notional * Decimal("100")) if notional else Decimal("0"),
     }

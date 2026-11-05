@@ -1,13 +1,12 @@
-"""The on-chain hedge of a weekend trade, in shadow (ADR-025, Version B).
+"""The on-chain hedge of a weekend trade, in shadow (ADR-025, ADR-033).
 
 The paper's design: when a customer trades at a weekend price, Yagnum
-mirrors the trade on Jupiter so the guaranteed price is covered. What is
-built here is that mirror, run end to end against the real chain - quote,
+mirrors the trade on Jupiter so the locked price is covered. What is built
+here is that mirror, run end to end against the real chain - quote,
 transaction, signature, mainnet simulation, fee arithmetic - and stopped one
 step short of sending. Every weekend trade therefore gets two `hedge_legs`
-rows that say what hedging it would have cost and, at settlement, what
-Version B would have earned or lost on it. That is the evidence the
-Version A / Version B decision needs.
+rows, and under the locked design their quotes are the hedge's fills on paper:
+the leftover they leave is what the ERR passes back to the trader.
 
 WHICH WAY THE ENGINE TRADES
 
@@ -27,6 +26,7 @@ return. A dead RPC endpoint can lose an observation, never a settlement.
 from __future__ import annotations
 
 import datetime as dt
+import time
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select
@@ -38,6 +38,7 @@ from config import settings
 from models import HedgeLeg, WeekendTrade
 
 SLIPPAGE_BPS = 50
+RATE_LIMIT_RETRY_SECONDS = (2, 5, 10)
 _CENT = Decimal("0.01")
 _MICRO = Decimal("0.000001")
 
@@ -52,6 +53,19 @@ def chain_side(customer_side: str, leg: str) -> str:
     if leg == "open":
         return mirror
     return "buy" if mirror == "sell" else "sell"
+
+
+def _with_retry(call):
+    """Jupiter's rate limit is a pause, not an answer: a leg's price is what
+    the locked design settles on, so a 429 waits and tries again."""
+    for delay in RATE_LIMIT_RETRY_SECONDS:
+        try:
+            return call()
+        except jupiter.JupiterError as exc:
+            if "429" not in str(exc):
+                raise
+            time.sleep(delay)
+    return call()
 
 
 def _quote(mint: str, decimals: int, side: str, qty: Decimal, reference: Decimal) -> tuple[dict, Decimal, Decimal]:
@@ -102,20 +116,26 @@ def gas_usd(session: Session, trade: WeekendTrade) -> Decimal:
     return total
 
 
-def _pnl(trade: WeekendTrade, opened: HedgeLeg, closing: HedgeLeg) -> None:
-    """Fill the close leg's three P/L columns (module doc)."""
+def _pnl(trade: WeekendTrade, opened: HedgeLeg | None, closing: HedgeLeg) -> None:
+    """Fill the close leg's three P/L columns (module doc).
+
+    The open leg's price is the trade's own quote, so a lost open leg falls
+    back to p_open: the hedge's entry is known either way.
+    """
     if trade.p_close is None:
         return
+    usable = opened is not None and opened.usd_amount > 0
+    open_price = opened.price if usable else trade.p_open
     # Per token, times the trade's size. The close leg's swap cannot be sized
     # to the exact token count (a buy is quoted in USDC), so its `qty` can
     # differ slightly from the trade's; the price per token is what carries.
     if trade.side == "sell":
         broker = trade.qty * (trade.p_close - trade.p_open)
-        chain = trade.qty * (opened.price - closing.price)
+        chain = trade.qty * (open_price - closing.price)
     else:
         broker = trade.qty * (trade.p_open - trade.p_close)
-        chain = trade.qty * (closing.price - opened.price)
-    gas = (opened.gas_usd or Decimal("0")) + (closing.gas_usd or Decimal("0"))
+        chain = trade.qty * (closing.price - open_price)
+    gas = ((opened.gas_usd if opened is not None else None) or Decimal("0")) + (closing.gas_usd or Decimal("0"))
     closing.broker_pnl = broker.quantize(_CENT, rounding=ROUND_HALF_UP)
     closing.chain_pnl = chain.quantize(_CENT, rounding=ROUND_HALF_UP)
     closing.version_b_pnl = (broker + chain - gas).quantize(_CENT, rounding=ROUND_HALF_UP)
@@ -152,7 +172,7 @@ def shadow_leg(session: Session, trade: WeekendTrade, leg: str) -> HedgeLeg | No
 
     # 1. The quote - the price this leg would get, for this exact size.
     try:
-        body, usd, tokens = _quote(trade.mint, decimals, side, trade.qty, reference)
+        body, usd, tokens = _with_retry(lambda: _quote(trade.mint, decimals, side, trade.qty, reference))
         row.qty = tokens
         row.usd_amount = usd
         row.price = usd / tokens if tokens else Decimal("0")
@@ -169,7 +189,7 @@ def shadow_leg(session: Session, trade: WeekendTrade, leg: str) -> HedgeLeg | No
     built = None
     if body is not None:
         try:
-            built = jupiter.build_swap(body, wallet)
+            built = _with_retry(lambda: jupiter.build_swap(body, wallet))
             row.compute_unit_limit = built.get("computeUnitLimit")
             row.priority_fee_lamports = built.get("prioritizationFeeLamports")
             row.last_valid_block_height = built.get("lastValidBlockHeight")
@@ -221,10 +241,10 @@ def shadow_leg(session: Session, trade: WeekendTrade, leg: str) -> HedgeLeg | No
     # 6. On the close leg, the Version B answer for this trade.
     if leg == "close":
         opened = _open_leg(session, trade)
-        if opened is not None and opened.usd_amount > 0 and row.usd_amount > 0:
+        if row.usd_amount > 0:
             _pnl(trade, opened, row)
         else:
-            errors.append("pnl: no usable open leg")
+            errors.append("pnl: no close quote")
 
     row.error = "; ".join(errors)[:2000] or None
     row.at = dt.datetime.now(dt.timezone.utc)

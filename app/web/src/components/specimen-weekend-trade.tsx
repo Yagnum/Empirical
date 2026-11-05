@@ -11,9 +11,9 @@ import { formatUsd } from "@/lib/money";
   229.99, the shadow token hedge's two quotes (bought at 225.54, sold at
   230.25). Re-run under the v2 rule on today's parameters:
 
-      deposit (ERR)  4,510.79 x 0.98% x 3.7742               = 166.85
+      deposit (ERR)  4,510.79 x 0.98% x 3.7742 + 0.40 gas    = 167.25
       hedge          broker -89.01 + token +94.19 - gas 0.36 = +4.82
-      returned       166.85 + 4.82                           = 171.67
+      returned       167.25 + 4.82                           = 172.07
       saved          20 x (229.99 - 225.54)                  = 89.01
 
   It was picked because it went the buyer's way, and the card says that
@@ -27,9 +27,9 @@ type Row = {
 
 const ROWS: Row[] = [
   { term: "You pay for the shares", value: "4510.79" },
-  { term: "Refundable deposit, held until Monday", value: "166.85" },
+  { term: "Refundable deposit, held until Monday", value: "167.25" },
   { term: "Monday: the price NVDA actually traded at", value: "229.99" },
-  { term: "Deposit back on Monday", value: "171.67", note: "+$4.82 extra" },
+  { term: "Deposit back on Monday", value: "172.07", note: "+$4.82 extra" },
 ];
 
 export function SpecimenWeekendTrade() {

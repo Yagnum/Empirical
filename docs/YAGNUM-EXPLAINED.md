@@ -116,17 +116,17 @@ Both use real recorded prices (Jupiter's executable quotes and the broker's sand
 | | |
 | --- | --- |
 | Trader pays for the shares | $4,510.79 |
-| ERR posted (3.7%) | $166.85 |
+| ERR posted (3.7%) | $167.25 |
 | Monday: shares bought at the broker | $229.99 |
 | Broker leg, 20 × (225.54 − 229.99) | −$89.01 |
 | Token leg, bought at 225.54, sold at 230.25 | +$94.19 |
 | Gas, both legs | −$0.36 |
 | **Leftover** | **+$4.82** |
-| **ERR returned** | **$171.67** |
+| **ERR returned** | **$172.07** |
 
 The trader paid $89.01 less than a Monday buyer would have, and received $4.82 more than they deposited.
 
-**Trade 125, a sell where the leftover was negative.** On the weekend, 10 NVDA at $230.80. The shares sold Monday at $226.15 (−$46.52), and the token was bought back at $226.67 (+$41.31). After $0.33 of gas the leftover was **−$5.54**, so $79.83 of the $85.37 ERR came back.
+**Trade 125, a sell where the leftover was negative.** On the weekend, 10 NVDA at $230.80. The shares sold Monday at $226.15 (−$46.52), and the token was bought back at $226.67 (+$41.31). After $0.33 of gas the leftover was **−$5.54**, so $80.23 of the $85.77 ERR came back.
 
 These were chosen to show one profit and one loss. Section 5 gives the distribution.
 
@@ -209,17 +209,17 @@ Measured on the 102 trades whose two Monday legs closed together:
 
 The 95% interval from a bootstrap over weekends is 0.30% to 0.44% for the standard deviation, and 97.9% to 99.6% for variance removed.
 
-In dollars, on this group's median trade of $2,820: an ERR of about $104, a leftover of $5.45 in median size, and a median signed leftover of −$1.78.
+In dollars, on this group's median trade of $2,820: an ERR of about $105, a leftover of $5.45 in median size, and a median signed leftover of −$1.78.
 
 How much of the 3.7% deposit each trade moved:
 
 | Leftover as a share of the deposit | Trades |
 | --- | --- |
-| Under 10% | 71% |
-| Under 25% | 94% |
+| Under 10% | 72% |
+| Under 25% | 95% |
 | Under 50% | 100% |
 
-The largest share of an ERR used by a loss was **29.7%**. Reserve breaches: **zero**. The leftover was a profit returned to the trader on **35%** of trades.
+The largest share of an ERR used by a loss was **29.5%**. Reserve breaches: **zero**. The leftover was a profit returned to the trader on **35%** of trades.
 
 ### The cost is real, and it is mostly the spread
 
@@ -246,7 +246,7 @@ The split is defined by an operational event, not by outcome, so it is not cherr
 | Delayed buy-back | 15 | 2.46% | 24.5% | −2.85% |
 | All | 117 | 0.96% | 94.3% (interval 90.2% to 97.3%) | −2.85% |
 
-The fix is simple: quote the buy-back the moment the share fills, before any journal runs.
+The fix is to quote the buy-back the moment the share fills, before any journal runs (ADR-034).
 
 ### Sizing the reserve from this
 
@@ -254,16 +254,16 @@ The live ERR uses σ = 0.98%, measured before this artefact was understood. That
 
 | σ | ERR | Breaches in 102 | Largest use |
 | --- | --- | --- | --- |
-| 0.98% (live) | 3.70% | 0 | 30% |
-| 0.50% | 1.89% | 0 | 58% |
-| 0.40% | 1.51% | 0 | 73% |
-| 0.30% | 1.13% | 0 | 97% |
+| 0.98% (live) | 3.70% | 0 | 29% |
+| 0.50% | 1.89% | 0 | 57% |
+| 0.40% | 1.51% | 0 | 72% |
+| 0.30% | 1.13% | 0 | 95% |
 
 We have not lowered it. This is in-sample, nine weekends are not evidence about a crisis, and the cost of being wrong on a reserve is asymmetric. Something near 2% looks plausible if the holiday weekends confirm it.
 
 ### Where it breaks: small trades and large ones
 
-**Very small trades.** All 4 breaches among trades with both hedge legs are trades of about $10 or less. Gas is flat, at about $0.34 for the two legs, while the ERR is a percentage. On a $0.77 trade the ERR is 3 cents. The proposal's formula has a `Fees_est` term for exactly this, and our parameter file sets it to zero. That is a real calibration bug, and setting it to about $0.40 addresses it. About 95% of that gas is a refundable token-account deposit, so the true economic cost is smaller still.
+**Very small trades.** Gas is flat, at about $0.34 for the two legs, while a percentage reserve shrinks with the trade. On a $0.77 trade, 3.7% is 3 cents. As first built, all 4 breaches among trades with both hedge legs were trades of about $10 or less. The proposal's formula has a `Fees_est` term for exactly this, and our parameter file had set it to zero. With a $0.40 term, the same trades show no breaches at any size. About 95% of that gas is a refundable token-account deposit, so the true economic cost is smaller still.
 
 **Large trades.** Those results come from quotes at the trade's own size, with a median near $3,000. Since 2026-11-01 we also record quotes at $10,000 and $50,000:
 
@@ -340,26 +340,29 @@ This section matters as much as the results.
 
 **The locked-price design is only days old.** It went live on 2026-11-01. For two months the engine ran the earlier design, where the trader ended at Monday's price, because that is how we first read the proposal. Its author then clarified the intent. So nearly every number in Section 5 is a **counterfactual**, recomputed from real recorded quotes and fills, rather than the record of a live locked trade.
 
-**The live record is small, and it has already exposed defects.** Six locked trades have opened:
+**The live record is small, and it exposed real defects.** Six locked trades opened in the first days:
 
-| Trade | ERR | Result |
+| Trade | ERR | What happened |
 | --- | --- | --- |
 | COIN sell | $81.30 | Worked. Leftover −$6.26, $75.04 returned |
 | QQQ buy | $11.38 | Worked. Leftover +$0.63, $12.01 returned |
-| NVDA sell | $227.97 | **No opening hedge leg was recorded**, so the whole −$84.81 move passed through |
-| SPY sell | $7.92 | **The closing quote hit a rate limit**, so the whole −$3.02 move passed through |
-| META buy | $3.20 | **Stuck.** The broker refuses the purchase for lack of buying power |
+| NVDA sell | $227.97 | **The opening journal failed**, so no deposit was taken and no cash advanced, yet the trade stayed alive and settled, passing the whole −$84.81 through |
+| SPY sell | $7.92 | **The closing quote hit a rate limit**, so the whole −$3.02 passed through |
+| META buy | $3.20 | **Stuck.** The broker refused the purchase for lack of buying power |
 | NVDA buy | $355.35 | **Stuck**, for the same reason |
 
-So only two of six behaved as designed. For the other two settled trades **the price was not actually locked**, because the system fell back to passing the move through. Across the whole dataset, 21% of settled trades lack a usable pair of hedge quotes. These defects are fixable, but they are real:
+Only two of six behaved as designed. Tracing the rest found problems larger than those six trades:
 
-1. A failed hedge quote must retry or block the trade, not fall through silently.
-2. On a buy, the firm must fund the purchase before the order, not reimburse it after.
-3. Settlement must run on a reliable scheduler rather than a best-effort cron.
-4. The close quote must be taken at the fill (Section 5).
-5. The ERR needs its flat fee term (Section 5).
+| Defect | Scale | The fix (ADR-034) |
+| --- | --- | --- |
+| A refused opening journal left the trade alive, and it later settled with nothing behind it | 34 persona trades, 28 already settled | Such a trade is now marked failed and never settles |
+| A buy's cash had already gone to the firm, so the broker refused the shares | Most of the stuck buys | The firm funds the purchase before the order |
+| A failed quote silently broke the lock | 10 quote failures recorded | Quotes retry, and the trade waits for a price rather than passing the move through |
+| The buy-back was priced after the sweep | 15 sells, a median of 46 hours late | The buy-back is priced at the fill |
+| Settlement ran about once a day, hours after the open | Every recent run | The job now starts hours early and waits for the open |
+| No flat gas term in the ERR | All 4 breaches | A $0.40 term |
 
-Fourteen trades across both designs are currently unsettled, the oldest since September.
+These fixes are written and tested (290 tests pass), **but they are not yet live, and nothing has yet confirmed them on a real Monday**. The 28 settled unfunded trades also left their simulated accounts with wrong cash balances, which have not been repaired. All of these were persona trades in a sandbox, and their market prices are real, so the price research stands. But they mean an earlier statement in this project, that the engine's arithmetic was correct, was too broad: the arithmetic was right when the money had moved, and the engine failed to check that it had.
 
 **A DEX cannot short.** This is the largest open design problem. To hedge a customer sell, Yagnum must sell a token it already holds. So a real version must carry inventory, and that inventory has price risk unless it is hedged in turn. Offsetting customer flow would help: in our simulated flow, netting buys against sells within each symbol and weekend would cut hedge volume by 37%, though simulated flow proves little about real flow. Customer buys have no such problem. Today's simulation hides this, because an empty wallet can still get a quote.
 
@@ -397,10 +400,10 @@ If a regulated weekend venue succeeds, the token hedge may become unnecessary. W
 | Broker fills | **Sandbox** fills |
 | Token hedge transactions | **Built, signed and simulated on mainnet. Never sent** |
 | Gas figures | **Real** arithmetic from assembled transactions |
-| Settlement arithmetic | **Real**, and checked by hand to the cent |
+| Settlement arithmetic | **Real**, checked by hand to the cent on funded trades (see Section 7 for the unfunded ones) |
 | The website and automation | **Real and running**, at `yagnum-web.azurewebsites.net` |
 
-**Who did what.** The proposal and its formulas were written by my father. The research questions and engineering decisions are mine, recorded in 33 architecture decision records. The code and the analysis scripts were written by an AI coding agent under my direction, and I am responsible for checking them. That is why this document names the cases where the numbers were wrong.
+**Who did what.** The proposal and its formulas were written by my father. The research questions and engineering decisions are mine, recorded in 34 architecture decision records. The code and the analysis scripts were written by an AI coding agent under my direction, and I am responsible for checking them. That is why this document names the cases where the numbers were wrong.
 
 ---
 
@@ -414,7 +417,7 @@ If a regulated weekend venue succeeds, the token hedge may become unnecessary. W
 
 ```
 ERR_initial = Q × P_open × σ × z + Fees_est
-σ = 0.0098    z = 3.7742    Fees_est = 0 (see Section 5)
+σ = 0.0098    z = 3.7742    Fees_est = $0.40
 ```
 
 **The hedge's net P&L**, which the proposal calls the cross-market hedge:
@@ -448,11 +451,11 @@ ERR_final = ERR_initial + P&L_net
 | Eventual settlement | Every trade ends Completed, Failed or Reversed | No trade stays open forever |
 | Reconciliation conservation | Q on-chain = Q at broker + Q reversed | No silent unhedged exposure |
 
-The live system currently falls short of the third and fourth: Section 7 lists trades that are stuck, and trades whose hedge was not recorded.
+The live system has fallen short of the third and fourth: Section 7 lists the trades that got stuck, and those whose hedge was not recorded.
 
 **One departure from the proposal's wording.** The proposal's example has Yagnum *buy* the token when Alice sells, because in that example Alice herself sells a token on Jupiter. In the product, the customer sells a share in a brokerage account and never touches a token. That leaves Yagnum long the share until Monday, so the offsetting hedge is to *sell* the token. The proposal's direction wording is worth revising in its next version, along with its §2 sentence saying Yagnum does not guarantee execution prices.
 
-**Design history.** ADR-017 and ADR-029 record the earlier design, in which the trader ended at Monday's price. ADR-028 records a one-day attempt at a locked price with no hedge, reverted because nothing covered the gap. ADR-033 records the current design. Older trades still settle under the design they opened with. Reading them in order shows how the idea developed.
+**Design history.** ADR-017 and ADR-029 record the earlier design, in which the trader ended at Monday's price. ADR-028 records a one-day attempt at a locked price with no hedge, reverted because nothing covered the gap. ADR-033 records the current design, and ADR-034 what its first live trades exposed. Older trades still settle under the design they opened with. Reading them in order shows how the idea developed.
 
 ---
 

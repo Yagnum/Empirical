@@ -39,6 +39,7 @@ pd.set_option("display.max_columns", 30)
 
 Z = 3.7742
 HEDGED_SIGMA = 0.0098  # err.HEDGED_SIGMA
+FEES_EST = 0.40  # err.LOCKED_FEES_EST
 DUST_USD = 100  # flat gas swamps any percentage below this; reported apart
 SYNC_HOURS = 1 / 6
 
@@ -75,7 +76,7 @@ def derive(w: pd.DataFrame) -> pd.DataFrame:
     h["left"] = h.broker + h.token - h.gas
     h["lp"] = h.left / h.notional * 100
     h["up"] = h.broker / h.notional * 100
-    h["err"] = h.notional * HEDGED_SIGMA * Z
+    h["err"] = h.notional * HEDGED_SIGMA * Z + FEES_EST
     h["loss_use"] = (-h.left).clip(lower=0) / h.err * 100
     h["abs_use"] = h.left.abs() / h.err * 100
     h["gap_h"] = (pd.to_datetime(h.close_at) - pd.to_datetime(h.filled_at)).dt.total_seconds() / 3600
@@ -141,7 +142,7 @@ def main() -> None:
 
     print("\n== how small could the ERR be, legs closed together")
     for sigma in (0.0098, 0.005, 0.004, 0.003):
-        err = sync.notional * sigma * Z
+        err = sync.notional * sigma * Z + FEES_EST
         loss = (-sync.left).clip(lower=0)
         print(f"  sigma {sigma:.4f}: ERR {sigma * Z * 100:.2f}%, breaches {(loss > err).sum()} of {len(sync)}, largest use {(loss / err).max() * 100:.0f}%")
 

@@ -876,9 +876,9 @@ def test_extended_hours_reaches_alpaca(client, monkeypatch):
 # v2, the locked price (ADR-033)
 # ---------------------------------------------------------------------------
 #
-# Hand-checked figures, on the pinned parameters (z 3.7759, fees 0) and
-# 2 NVDA at 200: the ERR is 400 x 0.0098 (the hedged leftover's sigma) x
-# 3.7759 = 14.8015... -> ceiling 14.81. Settlement fills at 195.
+# Hand-checked figures, on the pinned parameters (z 3.7759) and 2 NVDA at 200:
+# the ERR is 400 x 0.0098 (the hedged leftover's sigma) x 3.7759 + 0.40 (the
+# flat gas term) = 15.2015... -> ceiling 15.21. Settlement fills at 195.
 
 
 @pytest.fixture
@@ -905,7 +905,7 @@ def test_locked_err_is_sized_for_the_hedged_leftover(broker):
     sizing = err.compute_locked("NVDA", Decimal("2"), Decimal("200"))
     assert sizing["design"] == "locked"
     assert sizing["sigma_source"] == "hedged_leftover"
-    assert sizing["reserve"] == Decimal("14.81")
+    assert sizing["reserve"] == Decimal("15.21")
     # The same trade under pass-through holds the share's whole gap: 40.78.
     assert err.compute("NVDA", Decimal("2"), Decimal("200"))["reserve"] == Decimal("40.78")
 
@@ -914,8 +914,8 @@ def test_locked_open_escrows_the_err_and_advances_cash(db_client, broker, locked
     trade = _open_sell(db_client)
 
     assert trade["design"] == "locked"
-    assert trade["reserve"] == "14.81"
-    assert broker.journals[0]["amount"] == "14.81"
+    assert trade["reserve"] == "15.21"
+    assert broker.journals[0]["amount"] == "15.21"
     assert "ERR escrow" in broker.journals[0]["description"]
     assert broker.journals[1]["amount"] == "400.00"
 
@@ -924,7 +924,7 @@ def test_locked_preview_shows_the_design(db_client, broker, locked):
     sessions.set_weekend_override(True)
     body = db_client.get("/weekend/preview", params={"symbol": "NVDA", "side": "sell", "qty": "2"}).json()
     assert body["design"] == "locked"
-    assert body["reserve"] == "14.81"
+    assert body["reserve"] == "15.21"
 
 
 def test_locked_hedge_loss_comes_out_of_the_err(db_client, broker, locked, monkeypatch):
@@ -936,13 +936,13 @@ def test_locked_hedge_loss_comes_out_of_the_err(db_client, broker, locked, monke
     settled = _settle_regular(db_client, trade, monkeypatch)
 
     # Broker leg 2 x (195 - 200) = -10, token leg +10, gas 0.37: the
-    # leftover is -0.37, so 14.81 - 0.37 = 14.44 comes back. The trader
+    # leftover is -0.37, so 15.21 - 0.37 = 14.84 comes back. The trader
     # kept 200 - Monday's 195 cost them nothing but the leftover.
     assert settled["state"] == "settled"
     assert settled["true_up"] == "-0.37"
-    assert settled["escrow_returned"] == "14.44"
+    assert settled["escrow_returned"] == "14.84"
     assert broker.journals[0]["amount"] == "390.00"  # the sale, swept
-    assert broker.journals[1]["amount"] == "14.44"  # the ERR, back
+    assert broker.journals[1]["amount"] == "14.84"  # the ERR, back
     kinds = [event["kind"] for event in settled["events"]]
     assert "hedge_reconciled" in kinds
 
@@ -954,9 +954,9 @@ def test_locked_hedge_profit_is_refunded_to_the_trader(db_client, broker, locked
 
     settled = _settle_regular(db_client, trade, monkeypatch)
 
-    # -10 + 12 - 0.37 = +1.63, refunded on top of the ERR (§6b): 16.44.
+    # -10 + 12 - 0.37 = +1.63, refunded on top of the ERR (§6b): 16.84.
     assert settled["true_up"] == "1.63"
-    assert settled["escrow_returned"] == "16.44"
+    assert settled["escrow_returned"] == "16.84"
 
 
 def test_locked_without_a_hedge_passes_the_move_through(db_client, broker, locked, monkeypatch):
@@ -967,7 +967,7 @@ def test_locked_without_a_hedge_passes_the_move_through(db_client, broker, locke
     # hedge_mode is off in tests: no token leg, so the whole -10 move is the
     # leftover, and the event trail says so.
     assert settled["true_up"] == "-10"
-    assert settled["escrow_returned"] == "4.81"
+    assert settled["escrow_returned"] == "5.21"
     reconciled = [e for e in settled["events"] if e["kind"] == "hedge_reconciled"]
     assert "passes through whole" in reconciled[0]["detail"]
 
@@ -980,7 +980,234 @@ def test_locked_leftover_beyond_the_err_breaches(db_client, broker, locked):
         f"/weekend/orders/{trade['id']}/settle", json={"mode": "injected", "gap": "-0.2"}
     ).json()
 
-    # Unhedged, a 20% drop is -80 against a 14.81 ERR: breached, and the
-    # 65.19 beyond it is debited - the paper's shortfall cascade (§6c).
+    # Unhedged, a 20% drop is -80 against a 15.21 ERR: breached, and the
+    # 64.79 beyond it is debited - the paper's shortfall cascade (§6c).
     assert settled["state"] == "breached"
-    assert settled["shortfall"] == "65.19"
+    assert settled["shortfall"] == "64.79"
+
+
+def test_locked_err_covers_gas_on_a_very_small_trade(broker):
+    # 1 share at 1: 3.7 cents by percentage, against about 34 cents of gas.
+    sizing = err.compute_locked("NVDA", Decimal("1"), Decimal("1"))
+    assert sizing["reserve"] == Decimal("0.44")
+
+
+# ---------------------------------------------------------------------------
+# ADR-034: what the first live locked trades exposed
+# ---------------------------------------------------------------------------
+
+
+def _refuse_journals(monkeypatch, broker, *, after: int = 0):
+    """Let `after` journals through, then refuse the rest once each."""
+    real = broker._create_journal
+
+    def create(from_account, to_account, amount, *, description=None):
+        if "refunded" not in (description or "") and len(broker.journals) >= after:
+            raise alpaca.AlpacaError("transferable balance is insufficient", status_code=403)
+        return real(from_account, to_account, amount, description=description)
+
+    monkeypatch.setattr(alpaca, "create_journal", create)
+
+
+def _open_trades_in_db():
+    with db.session_scope() as session:
+        return [trade.id for trade in weekend.list_open_trades(session)]
+
+
+@pytest.mark.parametrize("design", ["locked", "pass_through"])
+def test_a_refused_reserve_fails_the_trade(db_client, broker, monkeypatch, design):
+    monkeypatch.setattr(settings, "weekend_design", design)
+    _refuse_journals(monkeypatch, broker)
+    sessions.set_weekend_override(True)
+
+    response = db_client.post("/weekend/orders", json={"symbol": "NVDA", "side": "sell", "qty": "2"})
+
+    assert response.status_code >= 400
+    assert broker.journals == []
+    # Nothing moved, so nothing is left to settle, and the shares are free.
+    assert _open_trades_in_db() == []
+    trades = db_client.get("/weekend/orders").json()
+    assert trades[0]["state"] == "failed"
+
+
+def test_a_refused_advance_refunds_the_reserve(db_client, broker, monkeypatch, locked):
+    _refuse_journals(monkeypatch, broker, after=1)
+    sessions.set_weekend_override(True)
+
+    response = db_client.post("/weekend/orders", json={"symbol": "NVDA", "side": "sell", "qty": "2"})
+
+    assert response.status_code >= 400
+    # The reserve went in, the advance was refused, the reserve came back.
+    assert [j["amount"] for j in broker.journals] == ["15.21", "15.21"]
+    assert broker.journals[1]["to"] == "acct-test-0001"
+    assert _open_trades_in_db() == []
+
+
+def test_a_failed_trade_cannot_be_settled(db_client, broker, monkeypatch, locked):
+    _refuse_journals(monkeypatch, broker)
+    sessions.set_weekend_override(True)
+    db_client.post("/weekend/orders", json={"symbol": "NVDA", "side": "sell", "qty": "2"})
+    trade_id = db_client.get("/weekend/orders").json()[0]["id"]
+
+    response = db_client.post(f"/weekend/orders/{trade_id}/settle", json={"mode": "market"})
+
+    assert response.status_code == 409
+    assert broker.orders == []
+
+
+def test_a_buy_is_funded_before_its_order(db_client, broker, locked, monkeypatch):
+    sessions.set_weekend_override(True)
+    trade = db_client.post("/weekend/orders", json={"symbol": "NVDA", "side": "buy", "qty": "2"}).json()
+    broker.journals.clear()
+
+    order_saw: list[int] = []
+    real_order = broker._create_order
+
+    def create_order(account_id, payload):
+        order_saw.append(len(broker.journals))
+        return real_order(account_id, payload)
+
+    monkeypatch.setattr(alpaca, "create_order", create_order)
+    broker.filled_avg_price = "205"
+    settled = _settle_regular(db_client, trade, monkeypatch)
+
+    # 2 x 200 last x 1.005 marketable x 1.02 buffer = 410.04, in before the
+    # order. The fill is 410, so the 0.04 excess comes back; then the ERR.
+    assert order_saw == [1]
+    assert broker.journals[0]["from"] == "firm-0001"
+    assert broker.journals[0]["amount"] == "410.04"
+    assert broker.journals[1]["from"] == "acct-test-0001"
+    assert broker.journals[1]["amount"] == "0.04"
+    assert settled["state"] == "settled"
+
+
+def test_a_refused_buy_retries_without_funding_twice(db_client, broker, locked, monkeypatch):
+    sessions.set_weekend_override(True)
+    trade = db_client.post("/weekend/orders", json={"symbol": "NVDA", "side": "buy", "qty": "2"}).json()
+    broker.journals.clear()
+    real_order = broker._create_order
+
+    def refuse(account_id, payload):
+        raise alpaca.AlpacaError("insufficient buying power", status_code=403)
+
+    monkeypatch.setattr(sessions, "scheduled_session", lambda now=None: sessions.REGULAR)
+    monkeypatch.setattr(alpaca, "create_order", refuse)
+    assert db_client.post(f"/weekend/orders/{trade['id']}/settle", json={"mode": "market"}).status_code == 400
+
+    monkeypatch.setattr(alpaca, "create_order", real_order)
+    settled = db_client.post(f"/weekend/orders/{trade['id']}/settle", json={"mode": "market"}).json()
+
+    funded = [j for j in broker.journals if "funded" in (j["description"] or "")]
+    assert len(funded) == 1
+    assert settled["state"] == "settled"
+
+
+def test_the_buy_back_is_priced_before_the_sweep_can_fail(db_client, broker, locked, monkeypatch):
+    import hedge
+
+    trade = _open_sell(db_client)
+    monkeypatch.setattr(sessions, "scheduled_session", lambda now=None: sessions.REGULAR)
+    priced_after: list[int] = []
+    broker.journals.clear()
+
+    def shadow(session, row, leg):
+        priced_after.append(len(broker.journals))
+
+    monkeypatch.setattr(weekend, "_shadow_hedge", shadow)
+    monkeypatch.setattr(hedge, "close_leg", lambda session, row: None)
+    db_client.post(f"/weekend/orders/{trade['id']}/settle", json={"mode": "market"})
+
+    # Called at the fill, while no journal has yet run.
+    assert priced_after[0] == 0
+
+
+def test_no_buy_back_price_makes_the_trade_wait(db_client, broker, locked, monkeypatch):
+    """The lock must not silently become a pass-through on a rate limit."""
+    from types import SimpleNamespace
+
+    import hedge
+
+    trade = _open_sell(db_client)
+    monkeypatch.setattr(sessions, "scheduled_session", lambda now=None: sessions.REGULAR)
+    monkeypatch.setattr(hedge, "enabled", lambda: True)
+    monkeypatch.setattr(weekend, "_shadow_hedge", lambda session, row, leg: None)
+    monkeypatch.setattr(hedge, "close_leg", lambda session, row: None)
+    broker.journals.clear()
+
+    waiting = db_client.post(f"/weekend/orders/{trade['id']}/settle", json={"mode": "market"}).json()
+
+    assert waiting["state"] == "awaiting_settlement"
+    assert waiting["true_up"] is None
+    # The sale is swept, but no reserve moves until the leftover is known.
+    assert [j["amount"] for j in broker.journals] == ["390.00"]
+
+    # The next run has a price: 10 on chain, 0.37 gas.
+    monkeypatch.setattr(hedge, "close_leg", lambda session, row: SimpleNamespace(chain_pnl=Decimal("10.00")))
+    monkeypatch.setattr(hedge, "gas_usd", lambda session, row: Decimal("0.37"))
+    settled = db_client.post(f"/weekend/orders/{trade['id']}/settle", json={"mode": "market"}).json()
+
+    assert settled["state"] == "settled"
+    assert settled["true_up"] == "-0.37"
+    # Exactly one sweep across both runs, then the ERR.
+    assert [j["amount"] for j in broker.journals] == ["390.00", "14.84"]
+
+
+# ---------------------------------------------------------------------------
+# settle_weekend.py --watch: start early, wait for the open
+# ---------------------------------------------------------------------------
+
+
+def _watcher(monkeypatch, open_counts, summaries=None):
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "settle_weekend.py"
+    spec = importlib.util.spec_from_file_location("settle_weekend_script", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    counts = iter(open_counts)
+    settled: list[int] = []
+    monkeypatch.setattr(module, "open_trade_count", lambda: next(counts))
+
+    def settle_once():
+        settled.append(1)
+        return {"settled": 1, "breached": 0, "awaiting": 0, "failed": 0, "log": []}
+
+    monkeypatch.setattr(module, "settle_once", settle_once)
+    return module, settled
+
+
+def test_watch_waits_for_the_open_then_settles(monkeypatch):
+    module, settled = _watcher(monkeypatch, [1, 0])
+    clock = iter([sessions.OVERNIGHT, sessions.PREMARKET, sessions.PREMARKET, sessions.REGULAR, sessions.REGULAR, sessions.REGULAR])
+    slept: list[int] = []
+
+    module.watch(sleep=slept.append, session_now=lambda: next(clock))
+
+    assert slept == [module.WATCH_POLL_SECONDS] * 3
+    assert settled == [1]
+
+
+def test_watch_with_nothing_open_exits_at_once(monkeypatch):
+    module, settled = _watcher(monkeypatch, [0])
+    slept: list[int] = []
+
+    module.watch(sleep=slept.append, session_now=lambda: sessions.OVERNIGHT)
+
+    assert slept == [] and settled == []
+
+
+def test_watch_keeps_checking_until_nothing_is_left(monkeypatch):
+    module, settled = _watcher(monkeypatch, [2, 2, 1, 0])
+    slept: list[int] = []
+
+    module.watch(sleep=slept.append, session_now=lambda: sessions.REGULAR)
+
+    assert len(settled) == 3
+    assert slept == [module.WATCH_SETTLE_PAUSE_SECONDS] * 2
+
+
+def test_watch_stops_after_its_passes_run_out(monkeypatch):
+    module, settled = _watcher(monkeypatch, [1] * 100)
+    module.watch(sleep=lambda seconds: None, session_now=lambda: sessions.REGULAR)
+    assert len(settled) == module.WATCH_SETTLE_PASSES

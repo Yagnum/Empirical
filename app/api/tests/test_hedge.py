@@ -8,6 +8,7 @@ import pytest
 from solders.keypair import Keypair
 
 import hedge
+import jupiter
 import solana
 from config import settings
 from models import HedgeLeg, WeekendTrade
@@ -187,3 +188,41 @@ def test_shadow_leg_survives_a_dead_chain(monkeypatch):
     row = hedge.shadow_leg(session, _trade("buy"), "open")
     assert row.error == "quote: quote host down; rent: rpc down"
     assert row.gas_lamports is None
+
+
+def test_a_rate_limit_waits_and_tries_again(monkeypatch):
+    monkeypatch.setattr(hedge, "RATE_LIMIT_RETRY_SECONDS", (0, 0))
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) < 3:
+            raise jupiter.JupiterError('{"code":429,"message":"Too many requests"}')
+        return "quote"
+
+    assert hedge._with_retry(flaky) == "quote"
+    assert len(calls) == 3
+
+
+def test_other_jupiter_errors_do_not_retry(monkeypatch):
+    monkeypatch.setattr(hedge, "RATE_LIMIT_RETRY_SECONDS", (0, 0))
+    calls = []
+
+    def broken():
+        calls.append(1)
+        raise jupiter.JupiterError("no route")
+
+    with pytest.raises(jupiter.JupiterError):
+        hedge._with_retry(broken)
+    assert len(calls) == 1
+
+
+def test_a_lost_open_leg_falls_back_to_the_trades_own_price():
+    trade = _trade(side="sell", p_open="230", p_close="225")
+    closing = HedgeLeg(trade_id=1, leg="close", price=Decimal("225.50"), gas_usd=None)
+
+    hedge._pnl(trade, None, closing)
+
+    # Sold at the trade's 230, bought back at 225.50, for 10 shares or whatever
+    # _trade uses: the token leg is known without the open row.
+    assert closing.chain_pnl == (trade.qty * Decimal("4.50")).quantize(Decimal("0.01"))
